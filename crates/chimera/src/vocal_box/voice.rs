@@ -159,55 +159,55 @@ impl EmotionPreset {
     pub const fn profile(self) -> EmotionProfile {
         match self {
             Self::Natural => EmotionProfile {
-                pressure_cm_h2o: 8.0,
-                tension: 0.50,
-                brightness: 0.30,
-                breathiness: 0.13,
-                roughness: 0.05,
-                fry: 0.0,
-                whisper: false,
-                larynx_cm: 0.0,
-                epilarynx: 0.14,
-                ventricular: 0.0,
-                glottis_noise_scale: 0.95,
-                f0_scale: 1.00,
-                rate_scale: 1.00,
-                vibrato_depth_cents: 0.0,
-                vibrato_rate_hz: 5.8,
-                drift_cents: 4.0,
-            },
-            Self::Warm => EmotionProfile {
-                pressure_cm_h2o: 7.6,
-                tension: 0.42,
-                brightness: 0.16,
-                breathiness: 0.20,
+                pressure_cm_h2o: 8.2,
+                tension: 0.52,
+                brightness: 0.32,
+                breathiness: 0.06,
                 roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: -0.28,
-                epilarynx: 0.06,
+                larynx_cm: 0.0,
+                epilarynx: 0.05,
                 ventricular: 0.0,
-                glottis_noise_scale: 1.00,
-                f0_scale: 0.95,
-                rate_scale: 0.95,
-                vibrato_depth_cents: 8.0,
-                vibrato_rate_hz: 5.4,
-                drift_cents: 4.0,
+                glottis_noise_scale: 0.95,
+                f0_scale: 1.00,
+                rate_scale: 0.78,
+                vibrato_depth_cents: 0.0,
+                vibrato_rate_hz: 5.8,
+                drift_cents: 3.5,
             },
-            Self::Tender => EmotionProfile {
-                pressure_cm_h2o: 5.8,
-                tension: 0.32,
-                brightness: 0.10,
-                breathiness: 0.40,
+            Self::Warm => EmotionProfile {
+                pressure_cm_h2o: 7.8,
+                tension: 0.45,
+                brightness: 0.20,
+                breathiness: 0.16,
                 roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
                 larynx_cm: -0.20,
                 epilarynx: 0.04,
                 ventricular: 0.0,
-                glottis_noise_scale: 1.15,
+                glottis_noise_scale: 1.00,
+                f0_scale: 0.96,
+                rate_scale: 0.75,
+                vibrato_depth_cents: 8.0,
+                vibrato_rate_hz: 5.4,
+                drift_cents: 3.5,
+            },
+            Self::Tender => EmotionProfile {
+                pressure_cm_h2o: 6.2,
+                tension: 0.34,
+                brightness: 0.12,
+                breathiness: 0.34,
+                roughness: 0.04,
+                fry: 0.0,
+                whisper: false,
+                larynx_cm: -0.18,
+                epilarynx: 0.04,
+                ventricular: 0.0,
+                glottis_noise_scale: 1.12,
                 f0_scale: 0.97,
-                rate_scale: 0.90,
+                rate_scale: 0.74,
                 vibrato_depth_cents: 6.0,
                 vibrato_rate_hz: 5.3,
                 drift_cents: 3.5,
@@ -215,89 +215,89 @@ impl EmotionPreset {
             Self::Joyful => EmotionProfile {
                 pressure_cm_h2o: 9.5,
                 tension: 0.60,
-                brightness: 0.52,
-                breathiness: 0.09,
-                roughness: 0.05,
+                brightness: 0.50,
+                breathiness: 0.07,
+                roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.20,
-                epilarynx: 0.32,
+                larynx_cm: 0.16,
+                epilarynx: 0.16,
                 ventricular: 0.0,
                 glottis_noise_scale: 0.90,
                 f0_scale: 1.18,
-                rate_scale: 1.08,
+                rate_scale: 0.82,
                 vibrato_depth_cents: 10.0,
                 vibrato_rate_hz: 6.0,
-                drift_cents: 5.0,
+                drift_cents: 4.5,
             },
             Self::Dramatic => EmotionProfile {
-                pressure_cm_h2o: 10.6,
-                tension: 0.66,
-                brightness: 0.54,
-                breathiness: 0.07,
-                roughness: 0.06,
+                pressure_cm_h2o: 10.4,
+                tension: 0.65,
+                brightness: 0.52,
+                breathiness: 0.06,
+                roughness: 0.05,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: -0.34,
-                epilarynx: 0.50,
-                ventricular: 0.02,
+                larynx_cm: -0.26,
+                epilarynx: 0.24,
+                ventricular: 0.01,
                 glottis_noise_scale: 0.92,
                 f0_scale: 1.08,
-                rate_scale: 0.93,
-                vibrato_depth_cents: 22.0,
+                rate_scale: 0.75,
+                vibrato_depth_cents: 20.0,
                 vibrato_rate_hz: 5.7,
-                drift_cents: 5.0,
+                drift_cents: 4.5,
             },
             Self::Melancholic => EmotionProfile {
-                pressure_cm_h2o: 6.2,
-                tension: 0.35,
-                brightness: 0.12,
-                breathiness: 0.34,
-                roughness: 0.06,
+                pressure_cm_h2o: 6.4,
+                tension: 0.36,
+                brightness: 0.14,
+                breathiness: 0.30,
+                roughness: 0.05,
                 fry: 0.06,
                 whisper: false,
-                larynx_cm: -0.26,
+                larynx_cm: -0.24,
                 epilarynx: 0.04,
                 ventricular: 0.0,
                 glottis_noise_scale: 1.10,
                 f0_scale: 0.88,
-                rate_scale: 0.86,
+                rate_scale: 0.73,
                 vibrato_depth_cents: 6.0,
                 vibrato_rate_hz: 5.0,
-                drift_cents: 6.0,
+                drift_cents: 5.0,
             },
             Self::Angry => EmotionProfile {
-                pressure_cm_h2o: 10.8,
-                tension: 0.78,
-                brightness: 0.68,
+                pressure_cm_h2o: 10.6,
+                tension: 0.76,
+                brightness: 0.64,
                 breathiness: 0.04,
-                roughness: 0.09,
+                roughness: 0.07,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.22,
-                epilarynx: 0.48,
-                ventricular: 0.04,
+                larynx_cm: 0.16,
+                epilarynx: 0.22,
+                ventricular: 0.02,
                 glottis_noise_scale: 0.95,
                 f0_scale: 1.15,
-                rate_scale: 1.08,
+                rate_scale: 0.80,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 6.2,
-                drift_cents: 6.5,
+                drift_cents: 5.0,
             },
             Self::Pressed => EmotionProfile {
                 pressure_cm_h2o: 9.6,
                 tension: 0.88,
                 brightness: 0.86,
                 breathiness: 0.02,
-                roughness: 0.06,
+                roughness: 0.05,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.18,
-                epilarynx: 0.42,
-                ventricular: 0.04,
+                larynx_cm: 0.16,
+                epilarynx: 0.24,
+                ventricular: 0.03,
                 glottis_noise_scale: 0.85,
                 f0_scale: 1.03,
-                rate_scale: 1.00,
+                rate_scale: 0.78,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 5.8,
                 drift_cents: 3.5,
@@ -315,13 +315,13 @@ impl EmotionPreset {
                 ventricular: 0.0,
                 glottis_noise_scale: 1.38,
                 f0_scale: 0.96,
-                rate_scale: 0.95,
+                rate_scale: 0.76,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 5.5,
-                drift_cents: 4.5,
+                drift_cents: 4.0,
             },
             Self::Whisper => EmotionProfile {
-                pressure_cm_h2o: 9.2,
+                pressure_cm_h2o: 9.4,
                 tension: 0.34,
                 brightness: 0.22,
                 breathiness: 0.92,
@@ -329,11 +329,11 @@ impl EmotionPreset {
                 fry: 0.0,
                 whisper: true,
                 larynx_cm: 0.0,
-                epilarynx: 0.24,
-                ventricular: 0.04,
+                epilarynx: 0.16,
+                ventricular: 0.03,
                 glottis_noise_scale: 3.20,
                 f0_scale: 1.00,
-                rate_scale: 0.95,
+                rate_scale: 0.75,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 5.5,
                 drift_cents: 3.0,
@@ -347,14 +347,14 @@ impl EmotionPreset {
                 fry: 0.80,
                 whisper: false,
                 larynx_cm: -0.16,
-                epilarynx: 0.14,
-                ventricular: 0.03,
+                epilarynx: 0.12,
+                ventricular: 0.02,
                 glottis_noise_scale: 0.90,
                 f0_scale: 0.72,
-                rate_scale: 0.93,
+                rate_scale: 0.75,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 5.0,
-                drift_cents: 4.5,
+                drift_cents: 4.0,
             },
             Self::Operatic => EmotionProfile {
                 pressure_cm_h2o: 11.0,
@@ -480,6 +480,7 @@ pub struct VocalBoxVoice {
     base_abduction: f64,
     base_closure: f64,
     base_glottis_noise: f64,
+    base_constriction_noise: f64,
     blend: [Blended; N_CONTROL],
 
     dc_x: f64,
@@ -507,6 +508,13 @@ pub struct VocalBoxVoice {
     sub: u32,
 }
 
+fn speech_artic_bank() -> ArticulatorBank {
+    let mut b = ArticulatorBank::new();
+    b.speed[ArticKey::Lateral.index()] = 1.25;
+    b.speed[ArticKey::Dorsum.index()] = 1.20;
+    b
+}
+
 impl VocalBoxVoice {
     /// Construct a warm, zero-allocation 4-organ [`VocalBoxVoice`] at output sample rate `fs_out` (Hz).
     pub fn new(fs_out: f64, body_mix: impl Into<BodyMix>) -> Self {
@@ -520,18 +528,7 @@ impl VocalBoxVoice {
         let m = oversample_for(fs_clean);
         let fs = fs_clean * m as f64;
         let mut airway = HumanAirway::new(fs, anatomy.body);
-        // Pre-warm the airway's slew-limiter scratch buffer at construction so `render()` allocates 0 bytes!
-        let init_artic = ArticulatorBank::new();
-        airway.apply(&init_artic.x, 1.0 / 1000.0);
-        airway.apply(&init_artic.x, 0.0);
-        airway.net.snap_to_targets();
-
-        let base_glottis_noise = airway.noise_gain.glottis;
-        let n_tract = airway.n_ph + airway.n_or;
-
-        let mut source = DEFAULT_SOURCE;
-        source.f0 = anatomy.speaking_f0_hz;
-        source.roughness = 0.05;
+        airway.max_area_rate = 65.0;
 
         let sc = anatomy.vtl_scale;
         let body_gain = if sc >= 1.0 {
@@ -541,6 +538,28 @@ impl VocalBoxVoice {
         } else {
             0.58 + 0.42 * (sc - 0.9) / 0.1
         };
+        // Smaller vocal tracts have smaller cross-sectional jet area (A ~ sc^2) and lower
+        // output_gain; scale anterior incisor-jet turbulence (`teeth`) strongly with 1/sc while
+        // keeping lingual groove noise (`constriction`) moderate so /s/ stays bright and anterior
+        // (labiodental /f, v/ modulate `constriction` dynamically in `control()`).
+        let inv_sc = clamp(1.0 / sc, 1.0, 1.40);
+        airway.noise_gain.teeth *= 1.44 * pow(inv_sc, 3.3);
+        airway.noise_gain.constriction *= 1.02 * pow(clamp(sc, 0.72, 1.0), 0.65);
+        airway.noise_gain.glottis *= 1.06 * pow(inv_sc, 2.0);
+
+        // Pre-warm the airway's slew-limiter scratch buffer at construction so `render()` allocates 0 bytes!
+        let init_artic = speech_artic_bank();
+        airway.apply(&init_artic.x, 1.0 / 1000.0);
+        airway.apply(&init_artic.x, 0.0);
+        airway.net.snap_to_targets();
+
+        let base_glottis_noise = airway.noise_gain.glottis;
+        let base_constriction_noise = airway.noise_gain.constriction;
+        let n_tract = airway.n_ph + airway.n_or;
+
+        let mut source = DEFAULT_SOURCE;
+        source.f0 = anatomy.speaking_f0_hz;
+        source.roughness = 0.04;
 
         let mut v = Self {
             fs_out: fs_clean,
@@ -557,11 +576,11 @@ impl VocalBoxVoice {
             clock: 0.0,
             gate: 0.0,
             musical_pitch_lock: false,
-            output_gain: 4.65e-7 * body_gain,
+            output_gain: 4.55e-7 * body_gain,
             max_penetration: 0.1,
             emotion: EmotionPreset::Natural,
             dec: Decimator::new(m),
-            ctrl_every: 64 * m,
+            ctrl_every: 16 * m,
             ctrl_counter: 0,
             gate_target: 0.0,
             score_breath_hold: 0.0,
@@ -575,13 +594,14 @@ impl VocalBoxVoice {
             base_abduction: 0.0,
             base_closure: 0.0,
             base_glottis_noise,
+            base_constriction_noise,
             blend: [Blended::default(); N_CONTROL],
             dc_x: 0.0,
             dc_y: 0.0,
             dc_coef: exp((-2.0 * PI * 25.0) / fs_clean),
             lim_peak: 0.0,
             lim_env: 0.0,
-            lim_attack: 1.0 - exp(-1.0 / (0.0025 * fs_clean)),
+            lim_attack: 1.0 - exp(-1.0 / (0.0012 * fs_clean)),
             lim_hold: 0,
             lim_hold_n: js_round(0.035 * fs_clean) as i64,
             lim_release: exp(-1.0 / (0.18 * fs_clean)),
@@ -715,7 +735,8 @@ impl VocalBoxVoice {
 
     /// Deterministically reset airway, vocal folds, articulators, and clock with zero allocations.
     pub fn reset(&mut self) {
-        self.artic = ArticulatorBank::new();
+        self.artic = speech_artic_bank();
+        self.airway.noise_gain.constriction = self.base_constriction_noise;
         self.clock = 0.0;
         self.gate = 0.0;
         self.gate_target = 0.0;
@@ -886,8 +907,8 @@ impl VocalBoxVoice {
                     } else {
                         self.lim_env = self.lim_peak;
                     }
-                    if self.lim_env > 0.76 {
-                        v *= 0.76 / self.lim_env;
+                    if self.lim_env > 0.70 {
+                        v *= 0.70 / self.lim_env;
                     }
                     let al = v.abs();
                     if al > 0.86 {
@@ -940,23 +961,78 @@ impl VocalBoxVoice {
         let mut breath_act = 0.0;
         let mut breath_val = 0.0;
         let mut f0_target = self.source.f0 * f0_scale_eff;
+        let mut non_lat_sealing = false;
 
         if self.score.size() > 0 {
             self.score.blend_all(t, &mut self.blend);
+            // 1. Prevent anticipatory nasal velum pre-ramps (weight < 3.5) from venting oral pressure
+            //    during preceding oral fricatives/stops (e.g. /v/ before /n/ in "evening"):
+            let obstr_active = self.blend[ArticKey::Labiodental.index()].weight > 0.5
+                || self.blend[ControlKey::ABDUCTION.index()].weight > 1.0;
+            if obstr_active {
+                let vel = &mut self.blend[ArticKey::Velum.index()];
+                if vel.weight > 0.0 && vel.weight < 3.5 {
+                    vel.weight *= smoothstep(2.4, 3.5, vel.weight);
+                }
+            }
+            // 2. Seal Lateral side-bypass ONLY when a non-lateral stop/coronal consonant is active:
+            //    Every lateral (/l, ɫ, ɭ, ɬ, ɮ/) puts TtY and Lateral in the same dominant gesture,
+            //    so `TtY.weight - Lateral.weight` isolates non-lateral coronal weight without ever
+            //    touching /l, ɫ/ alone, while sealing cleanly across /ɫ-tʃ/ ("small change") and
+            //    holding /g-l/ ("gleam") sealed through the velar stop closure.
+            let lat_w = self.blend[ArticKey::Lateral.index()].weight;
+            let non_lat_coronal_w = self.blend[ArticKey::TtY.index()].weight - lat_w;
+            non_lat_sealing = non_lat_coronal_w > 8.0
+                || (self.blend[ArticKey::TbY.index()].weight > 6.0
+                    && self.blend[ArticKey::TbY.index()].value > 8.0)
+                || (self.blend[ArticKey::LipAp.index()].weight > 6.0
+                    && self.blend[ArticKey::LipAp.index()].value < 0.0);
+            if non_lat_sealing {
+                let lat = &mut self.blend[ArticKey::Lateral.index()];
+                lat.value = 0.0;
+                lat.weight = 48.0;
+                lat.speed = 2.6;
+            }
+            // 3. Nimble vowel tracking transitioning to calibrated consonant speed
+            //    (keeping LipAp locked at 1.00x during /f, v/ labiodental tucks):
+            let lab_tuck = self.blend[ArticKey::Labiodental.index()].weight > 0.2;
+            for k in [
+                ArticKey::Jaw,
+                ArticKey::TbX,
+                ArticKey::TbY,
+                ArticKey::TtX,
+                ArticKey::TtY,
+                ArticKey::TtCurl,
+                ArticKey::Root,
+                ArticKey::LipAp,
+                ArticKey::LipProt,
+                ArticKey::LipWidth,
+            ] {
+                let i = k.index();
+                self.artic.speed[i] = if k == ArticKey::LipAp && lab_tuck {
+                    1.00
+                } else if self.blend[i].weight > 5.0 {
+                    1.06
+                } else {
+                    1.55
+                };
+            }
             let b = &self.blend;
             self.artic.step(dt, Some(&b[..]), 0.05);
 
-            let kf = self.anatomy.fold_area_scale;
+            let k2 = self.anatomy.vtl_scale * self.anatomy.vtl_scale;
             let ab = b[ControlKey::ABDUCTION.index()];
+            let is_vfric = ab.value > 0.0 && ab.value <= 0.06;
             let ab_act = if ab.weight > 0.0 {
-                js_min(1.0, ab.weight / 2.0)
+                js_min(1.0, ab.weight / if is_vfric { 2.0 } else { 4.2 })
             } else {
                 0.0
             };
             let abd = if self.source.voiced {
-                self.base_abduction + ab.value * ab_act * kf
+                let vfric_boost = if is_vfric { 1.35 } else { 1.0 };
+                self.base_abduction + ab.value * vfric_boost * ab_act * k2
             } else {
-                js_max(self.base_abduction, ab.value * ab_act * kf)
+                js_max(self.base_abduction, ab.value * ab_act * self.anatomy.fold_area_scale)
             };
 
             let cl = b[ControlKey::CLOSURE.index()];
@@ -971,7 +1047,7 @@ impl VocalBoxVoice {
 
             let br = b[ControlKey::BREATH.index()];
             if br.weight > 0.0 {
-                breath_act = js_min(1.0, br.weight);
+                breath_act = smoothstep(0.50, 1.0, js_min(1.0, br.weight));
                 breath_val = br.value;
             }
 
@@ -1034,11 +1110,26 @@ impl VocalBoxVoice {
         }
         self.clock += dt;
 
-        // Apply 2D midsagittal geometry -> airway area targets with inelastic palate contact
-        let x = self.artic.x;
+        // Apply 2D midsagittal geometry -> airway area targets with inelastic palate contact.
+        // Because `ArticKey::Lateral` has `min = 0.0` (unlike `Velum`'s `-0.25`), a 2nd-order filter
+        // otherwise creeps asymptotically > 0 for >100 ms; `lat_eff` seals Lateral in finite time
+        // (smoothly slew-limited by `HumanAirway::apply` so zero step click can occur).
+        let lat_eff = |raw_lat: f64| -> f64 {
+            if non_lat_sealing || raw_lat <= 0.12 {
+                0.0
+            } else {
+                (raw_lat - 0.12) / 0.88
+            }
+        };
+        let mut x = self.artic.x;
+        x.lateral = lat_eff(x.lateral);
+        let inv_sc = clamp(1.0 / self.anatomy.vtl_scale, 1.0, 1.40);
+        self.airway.noise_gain.constriction = self.base_constriction_noise
+            * (1.0 + 0.70 * pow(inv_sc, 1.8) * clamp(x.labiodental, 0.0, 1.0));
         self.airway.apply(&x, dt);
         if self.enforce_contacts() {
-            let x = self.artic.x;
+            let mut x = self.artic.x;
+            x.lateral = lat_eff(x.lateral);
             self.airway.reapply(&x);
         }
         self.airway.net.begin_block(self.ctrl_every);
@@ -1069,7 +1160,7 @@ impl VocalBoxVoice {
         let f0_base = js_max(self.source.f0 * f0_scale_eff, 40.0);
         let prosodic_p = if !self.musical_pitch_lock && self.score_f0.is_some() {
             let oct = log2(clamp(f0_target / f0_base, 0.5, 2.0));
-            clamp(1.0 + 0.34 * oct, 0.90, 1.18)
+            clamp(1.0 + 0.30 * oct, 0.98, 1.18)
         } else {
             1.0
         };

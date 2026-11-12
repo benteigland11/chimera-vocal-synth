@@ -30,9 +30,9 @@ impl BodyAnatomy {
             BodyName::Child => 0.36,
         });
         let base_chink_cm2 = clean.blend(|b| match b {
-            BodyName::Male => 0.0068,
-            BodyName::Female => 0.0076,
-            BodyName::Child => 0.0046,
+            BodyName::Male => 0.0018,
+            BodyName::Female => 0.0048,
+            BodyName::Child => 0.0030,
         });
         let speaking_f0_hz = clean.blend(|b| match b {
             BodyName::Male => 110.0,

@@ -224,12 +224,16 @@ pub fn text(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let text = arg(a, 1, "Hello world.");
     let body_name = arg(a, 2, "male");
     let g = g2p()?;
+    let text_ctx = Ctx {
+        float: ctx.float,
+        emotion: Some(ctx.emotion.unwrap_or_default()),
+    };
     let t = Instant::now();
-    let s = say_with_ctx(ctx, &g, text, body_name)?;
+    let s = say_with_ctx(&text_ctx, &g, text, body_name)?;
     let ms = ms_since(t);
     println!("{}", s.shown);
     let file = wav_name(name);
-    ctx.write_wav(&file, &s.out)?;
+    text_ctx.write_wav(&file, &s.out)?;
     println!(
         "wrote {file}  {} s, rendered in {} ms",
         fixed(s.out.len() as f64 / FS, 2),

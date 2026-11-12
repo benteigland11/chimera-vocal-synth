@@ -153,9 +153,9 @@ impl TwoMassGlottis {
             oq_sm: DEFAULT_GLOTTIS.open_quotient,
             sharp_sm: DEFAULT_GLOTTIS.closure_sharpness,
             dp_sm: 0.0,
-            dp_coef: 1.0 - exp(-TAU * 35.0 / fs_clean),
+            dp_coef: 1.0 - exp(-TAU * 42.0 / fs_clean),
             voicing_sm: 0.0,
-            voice_coef: 1.0 - exp(-TAU * 48.0 / fs_clean),
+            voice_coef: 1.0 - exp(-TAU * 65.0 / fs_clean),
             abduct_sm: 0.0,
             closure_sm: 0.0,
             amp_sm: 0.0,
@@ -259,17 +259,18 @@ impl TwoMassGlottis {
             let fry_amt = clamp(p.fry, 0.0, 1.0);
             f0_raw = clamp(f0_raw * (1.0 - 0.18 * fry_amt), 24.0, 1600.0);
         }
-        self.f0_sm += sc * (f0_raw - self.f0_sm);
-        let f0_target = self.f0_sm;
-        if (self.measured_f0 - f0_target).abs() > 0.28 * f0_target {
-            self.measured_f0 = f0_target;
+        if (f0_raw - self.f0_sm).abs() > 0.35 * self.f0_sm {
+            self.measured_f0 = f0_raw;
             self.q_trim = 1.0;
         }
+        self.f0_sm += sc * (f0_raw - self.f0_sm);
+        let f0_target = self.f0_sm;
 
         // Smooth all control & cycle parameters per sample to eliminate control-rate step kinks
         let effort_scale = 0.45 + 0.75 * clamp(p.effort, 0.0, 1.5);
+        let sc_abd = js_min(1.0, 1.75 * sc);
         self.amp_sm += sc * (js_max(0.0, p.amplitude) * effort_scale - self.amp_sm);
-        self.abduct_sm += sc * (js_max(0.0, p.abduction) - self.abduct_sm);
+        self.abduct_sm += sc_abd * (js_max(0.0, p.abduction) - self.abduct_sm);
         self.closure_sm += sc * (clamp(p.closure, 0.0, 1.0) - self.closure_sm);
         self.oq_sm += sc * (clamp(p.open_quotient, 0.30, 0.92) - self.oq_sm);
         self.sharp_sm += sc * (clamp(p.closure_sharpness, 0.0, 1.0) - self.sharp_sm);
@@ -281,25 +282,28 @@ impl TwoMassGlottis {
         let dp_ac_cm_h2o = clamp((dp_clean - self.dp_sm) / CM_H2O, -3.5, 3.5);
         let pth_cm_h2o = self.threshold / CM_H2O;
 
-        // Aerodynamic & laryngeal voicing gates
-        let abd_ref = js_max(0.075, 0.85 * p.amplitude + 0.045);
-        let p_gate = smoothstep(0.68 * pth_cm_h2o, 1.35 * pth_cm_h2o, dp_cm_h2o);
-        let abd_gate = 1.0 - smoothstep(0.45 * abd_ref, 1.25 * abd_ref, self.abduct_sm);
+        // Aerodynamic & laryngeal voicing gates:
+        // Cartilaginous arytenoid abduction scales with vocal-tract cross-section k_vtl^2 ≈ sqrt(kf),
+        // devoicing cleanly during voiceless stops/fricatives while re-adducting promptly across VOT.
+        let k2_est = clamp(sqrt(js_max(p.amplitude, 0.008) / 0.17), 0.52, 1.05);
+        let p_gate = smoothstep(0.65 * pth_cm_h2o, 1.30 * pth_cm_h2o, dp_cm_h2o);
+        let abd_gate = 1.0 - smoothstep(0.10 * k2_est, 0.205 * k2_est, self.abduct_sm);
         let drive_gate = p_gate * abd_gate * (1.0 - self.closure_sm);
 
         // Membranous pre-phonatory neutral half-width x0 (cm):
-        // Tight TA medial adduction (low OQ / pressed) narrows x0 so folds collide firmly;
-        // relaxed breathy adduction widens x0 toward a soft, H1-dominant open wave.
+        // Calibrated so modal speech (OQ ~ 0.58) achieves a complete ~40% closed phase decoupling the
+        // subglottal trachea, pressed phonation closes ~50%, and breathy phonation stays softly open.
         let oq_u = clamp((self.oq_sm - 0.34) / 0.52, 0.0, 1.0);
-        let x0_modal = lerp(0.0068, 0.0165, oq_u);
-        let x0 = clamp(x0_modal - 0.020 * self.closure_sm, -0.012, 0.045);
+        let x0_modal = lerp(0.0046, 0.0128, oq_u);
+        let x0 = clamp(x0_modal - 0.018 * self.closure_sm, -0.010, 0.045);
 
         // Collision stiffness & CT/TA pitch coordination (Titze 1994):
         // Stronger collision shortens the closed half-period by ~1/sqrt(1 + col_k); scaling open
         // stiffness by the closed-fraction duty factor keeps F0 true to target across adduction modes.
-        let col_k = 0.78 + 0.52 * self.sharp_sm;
-        let phi_col = clamp((0.025 - x0_modal) / 0.050, 0.0, 0.45);
-        let col_comp = (1.0 - phi_col) + phi_col / sqrt(1.0 + 0.85 * col_k);
+        let col_k = 0.78 + 0.50 * self.sharp_sm;
+        let skew_close = 1.0 + 0.26 * clamp(p.skew - 0.50, 0.0, 0.40);
+        let phi_col = clamp((0.025 - x0_modal) / 0.040, 0.0, 0.52);
+        let col_comp = ((1.0 - phi_col) + phi_col / sqrt(1.0 + 0.92 * col_k)) / sqrt(0.5 + 0.5 * skew_close);
 
         // Ishizaka & Flanagan (1972) natural-frequency detuning (omega_1 > omega_2 -> x1 leads x2!)
         let f0_inst = clamp(f0_target / self.period_scale_sm, 22.0, 1800.0);
@@ -310,8 +314,8 @@ impl TwoMassGlottis {
 
         // Supra-threshold dissipative vena-contracta drive
         let p_mean = clamp((dp_cm_h2o - 0.65 * pth_cm_h2o) / 6.2, 0.0, 2.4);
-        let p_norm = clamp(0.58 + 0.52 * p_mean + 0.08 * dp_ac_cm_h2o, 0.0, 2.5)
-            * drive_gate
+        let p_norm = clamp(0.62 + 0.52 * p_mean + 0.03 * dp_ac_cm_h2o, 0.0, 2.5)
+            * smoothstep(0.0, 0.42, drive_gate)
             * if self.amp_sm > 1e-4 { 1.0 } else { 0.0 };
 
         let n_sub = if self.fs < 70_000.0 || f0_target > 420.0 {
@@ -321,17 +325,17 @@ impl TwoMassGlottis {
         };
         let dt = 1.0 / (self.fs * n_sub as f64);
 
-        let c1_open = 2.0 * 0.075 * (1.16 * omega);
-        let c2_open = 2.0 * 0.090 * (0.84 * omega);
-        let r_target = 0.025
-            * (0.76 + 0.30 * clamp(p_mean, 0.0, 1.6))
-            * smoothstep(0.0, 0.18, drive_gate)
+        let c1_open = 2.0 * 0.074 * (1.16 * omega);
+        let c2_open = 2.0 * 0.088 * (0.84 * omega);
+        let r_target = 0.0265
+            * (0.78 + 0.28 * clamp(p_mean, 0.0, 1.6))
+            * smoothstep(0.02, 0.26, drive_gate)
             * self.cycle_amp_sm;
 
         // Continuous C^1 aerodynamic Bernoulli VOT entrainment:
         // Advances smoothly inside the acceleration ODE (never teleporting x1/x2 or v1/v2!),
-        // so glottal area A_g(t) has zero step/slope clicks while entraining within <10 ms.
-        let drive_on = smoothstep(0.03, 0.16, p_norm);
+        // so glottal area A_g(t) has zero step/slope clicks while entraining within <8 ms.
+        let drive_on = smoothstep(0.02, 0.14, p_norm);
         let e_target = js_max(r_target * r_target, 1e-8);
 
         for _ in 0..n_sub {
@@ -348,17 +352,18 @@ impl TwoMassGlottis {
             let e_ratio = e_fold / e_target;
             let sat = 1.0 / (1.0 + e_ratio);
 
-            let deficit = drive_on * (1.0 - smoothstep(0.06, 0.72, e_ratio));
-            let onset_boost = 1.0 + 0.75 * deficit;
+            let deficit = drive_on * (1.0 - smoothstep(0.08, 0.78, e_ratio));
+            let onset_boost = 1.0 + 0.90 * deficit;
 
-            let gamma = 1.32 * onset_boost * clamp(p_norm, 0.0, 1.65) * sat * omega * omega;
+            let gamma = 1.36 * onset_boost * clamp(p_norm, 0.0, 1.70) * sat * omega * omega;
             let conv_diff = clamp(self.x1 - self.x2, -0.055, 0.055);
-            let p_drive1 = gamma * conv_diff;
+            let asym = if conv_diff < 0.0 { skew_close } else { 1.0 };
+            let p_drive1 = gamma * asym * conv_diff;
             let p_drive2 = -0.14 * gamma * conv_diff;
 
             // Smooth resonant aerodynamic suction entrainment when waking from rest/abduction
             let ang = TAU * self.entrain_phase;
-            let f_entrain = deficit * (0.95 * r_target * omega * omega);
+            let f_entrain = deficit * (1.10 * r_target * omega * omega);
             let f_seed1 = -f_entrain * sin(ang);
             let f_seed2 = -0.86 * f_entrain * sin(ang - 0.98);
 
@@ -367,8 +372,8 @@ impl TwoMassGlottis {
             let d1 = if a1 < 0.0 { c1_open * 2.2 } else { c1_open };
             let d2 = if a2 < 0.0 { c2_open * 2.2 } else { c2_open };
 
-            let cubic1 = 110.0 * k1 * self.x1 * self.x1 * self.x1;
-            let cubic2 = 110.0 * k2 * self.x2 * self.x2 * self.x2;
+            let cubic1 = 105.0 * k1 * self.x1 * self.x1 * self.x1;
+            let cubic2 = 105.0 * k2 * self.x2 * self.x2 * self.x2;
 
             let f1 = p_drive1 + f_seed1
                 - k1 * self.x1
@@ -392,10 +397,10 @@ impl TwoMassGlottis {
         let a1 = x0 + self.x1;
         let a2 = x0 + self.x2;
         let diff_a = a1 - a2;
-        let a_min_smooth = 0.5 * (a1 + a2 - sqrt(diff_a * diff_a + 1.0e-6));
+        let a_min_smooth = 0.5 * (a1 + a2 - sqrt(diff_a * diff_a + 4.0e-7));
 
         // Sub-sample opening-crossing pitch servo & correlated neuromuscular perturbations
-        let thresh = 0.001;
+        let thresh = 0.0008;
         let is_open = a_min_smooth > thresh;
         self.period_acc += 1.0;
         if is_open && !self.prev_open && self.period_acc > 0.50 * self.fs / js_max(f0_target, 24.0)
@@ -405,10 +410,10 @@ impl TwoMassGlottis {
             let exact_samples = self.period_acc - frac;
             let inst_f0 = self.fs / js_max(exact_samples, 1.0);
             let expected = f0_target / self.cycle_period_scale;
-            if inst_f0 > 0.58 * expected && inst_f0 < 1.80 * expected {
+            if inst_f0 > 0.55 * expected && inst_f0 < 1.85 * expected {
                 self.measured_f0 = lerp(self.measured_f0, inst_f0, 0.45);
-                let ratio = clamp(expected / inst_f0, 0.82, 1.22);
-                self.q_trim = clamp(self.q_trim * pow(ratio, 0.28), 0.70, 1.30);
+                let ratio = clamp(expected / inst_f0, 0.80, 1.24);
+                self.q_trim = clamp(self.q_trim * pow(ratio, 0.30), 0.68, 1.32);
             }
             self.period_acc = frac;
 
@@ -494,10 +499,13 @@ impl TwoMassGlottis {
         }
         self.voicing = clamp(self.voicing_sm, 0.0, 1.0);
 
-        // Progressive anterior-to-posterior mucosal zipper contact + cartilaginous abduction + chink
-        let zipper_delta = lerp(0.0155, 0.0011, self.sharp_sm);
-        let h_vib = zipper_area_c1(a_min_smooth, zipper_delta) * self.voicing;
-        let dyn_gain = self.amp_sm / 0.028;
+        // Progressive anterior-to-posterior mucosal zipper contact + cartilaginous abduction + chink:
+        // osc_env zeroes the resting x0 offset during voiceless segments without double-suppressing
+        // vibration amplitude during breathy VOT onset (since x1/x2 already scale dynamically).
+        let zipper_delta = lerp(0.0046, 0.0007, self.sharp_sm);
+        let osc_env = smoothstep(0.015, 0.22, self.voicing) * smoothstep(0.0008, 0.0045, sqrt(amp1_sq));
+        let h_vib = zipper_area_c1(a_min_smooth, zipper_delta) * osc_env;
+        let dyn_gain = self.amp_sm / 0.0235;
 
         let static_abduct = self.abduct_sm * (1.0 - 0.92 * self.closure_sm);
         let chink = js_max(0.0, p.chink) * (1.0 - 0.92 * self.closure_sm);

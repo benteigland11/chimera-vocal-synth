@@ -636,4 +636,76 @@ fn speech_and_singing_are_dynamic_and_free_of_clicks_or_flat_topping() {
     assert_eq!(flat_plateaus, 0, "Operatic singing had {flat_plateaus} flat-topped peak plateaus");
 }
 
+#[test]
+fn modal_speech_glottal_closure_and_cross_body_intelligibility() {
+    chimera::init();
+
+    for (label, body, f0) in [
+        ("male", BodyMix::MALE, 112.0),
+        ("female", BodyMix::FEMALE, 205.0),
+        ("child", BodyMix::CHILD, 250.0),
+    ] {
+        // Connected phrase with sibilants, stops, clusters, and diphthongs: "She shapes sharp waves"
+        let segs = tokenize_ipa("ʃi ˈʃeɪps ˈʃɑrp ˈweɪvz");
+        let plan = plan_utterance(
+            &segs,
+            &PlanOptions {
+                body,
+                t0: 0.05,
+                f0: Some(f0),
+                ..Default::default()
+            },
+        );
+        let mut v = VocalBoxVoice::new(FS, body);
+        v.set_source(&SourcePatch::f0(f0));
+        v.schedule(&plan.gestures);
+
+        let total = ((plan.end + 0.25) * FS).round() as usize;
+        let mut out = vec![0.0f32; total];
+        let mut min_voiced_glottal_area = f64::INFINITY;
+        for chunk in out.chunks_mut(4) {
+            v.render(chunk);
+            let tel = v.instant_telemetry();
+            if tel.voicing > 0.80 {
+                min_voiced_glottal_area = min_voiced_glottal_area.min(tel.glottal_area_cm2);
+            }
+        }
+
+        // 1. Modal speech must achieve true glottal closure (< 0.010 cm^2, vs ~0.12 cm^2 peak open)
+        assert!(
+            min_voiced_glottal_area < 0.010,
+            "{label} modal speech failed to close glottis (min area = {min_voiced_glottal_area:.5} cm^2)"
+        );
+
+        // 2. Every vowel must voice clearly and every voiceless sibilant must carry audible frication
+        let mut vowel_rms_sum = 0.0;
+        let mut vowel_n = 0usize;
+        let mut sib_rms_sum = 0.0;
+        let mut sib_n = 0usize;
+        for seg in &plan.segments {
+            let ia = (seg.t0 * FS).round() as usize;
+            let ib = ((seg.t1 * FS).round() as usize).min(out.len());
+            let r = rms(&out[ia..ib]);
+            if matches!(seg.ipa.as_str(), "i" | "eɪ" | "ɑ") {
+                assert!(
+                    r > 0.015,
+                    "{label} vowel {:?} too quiet: rms={r:.4}",
+                    seg.ipa
+                );
+                vowel_rms_sum += r;
+                vowel_n += 1;
+            } else if matches!(seg.ipa.as_str(), "ʃ" | "s") {
+                sib_rms_sum += r;
+                sib_n += 1;
+            }
+        }
+        let mean_vowel_rms = vowel_rms_sum / vowel_n as f64;
+        let mean_sib_rms = sib_rms_sum / sib_n as f64;
+        assert!(
+            mean_sib_rms > 0.14 * mean_vowel_rms,
+            "{label} sibilants choked relative to vowels: sib={mean_sib_rms:.4}, vowel={mean_vowel_rms:.4}"
+        );
+    }
+}
+
 
