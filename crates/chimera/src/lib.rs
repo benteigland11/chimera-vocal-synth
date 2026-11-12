@@ -48,6 +48,7 @@ pub mod util {
 pub mod creatures;
 pub mod engine;
 pub mod phonetics;
+pub mod vocal_box;
 
 /// Parse every embedded data table now (an `Engine` does this when it is created), so nothing
 /// initialises lazily on an audio thread later.
