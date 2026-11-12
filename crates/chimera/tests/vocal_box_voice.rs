@@ -3,15 +3,17 @@
 //! and [`TwoMassGlottis`].
 
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
 struct CountingAlloc;
 
-static ALLOC_COUNT: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    static TL_ALLOC_COUNT: Cell<usize> = const { Cell::new(0) };
+}
 
 unsafe impl GlobalAlloc for CountingAlloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        ALLOC_COUNT.fetch_add(1, Ordering::Relaxed);
+        let _ = TL_ALLOC_COUNT.try_with(|c| c.set(c.get().wrapping_add(1)));
         unsafe { System.alloc(layout) }
     }
 
@@ -128,7 +130,7 @@ fn audio_path_and_telemetry_do_not_allocate() {
     let mut tm = TwoMassGlottis::new(96_000.0);
     let _ = tm.step(8.0 * CM_H2O);
 
-    let before = ALLOC_COUNT.load(Ordering::SeqCst);
+    let before = TL_ALLOC_COUNT.get();
     for step in 0..40 {
         if step == 10 {
             voice.set_emotion(EmotionPreset::Operatic);
@@ -141,7 +143,7 @@ fn audio_path_and_telemetry_do_not_allocate() {
             let _ = tm.step(8.0 * CM_H2O);
         }
     }
-    let after = ALLOC_COUNT.load(Ordering::SeqCst);
+    let after = TL_ALLOC_COUNT.get();
     assert_eq!(
         after - before,
         0,
@@ -794,4 +796,180 @@ fn mucosal_wave_stability_single_impulse_closure_and_zero_scoop_vot_pitch() {
         min_nonfinal_f0 > 185.0 && min_voiced_f0 > 165.0 && max_voiced_f0 < 252.0,
         "unexpected post-consonant F0 scoop or overshoot: nonfinal_min={min_nonfinal_f0:.1} Hz, min={min_voiced_f0:.1} Hz, max={max_voiced_f0:.1} Hz"
     );
+}
+
+#[test]
+fn mouth_closing_stays_bounded_without_pressure_spikes_or_clicks() {
+    chimera::init();
+
+    let phrases = [
+        ("01_male", "wi bˈɪɫt ðˈɪs nˈu vˈɔɪs fɹˈʌm fˈɝst pɹˈɪnsəpəɫz ənd ˈɛvɚi sˈaʊnd kˈʌmz fɹˈʌm fˈɪzɪks", "male", 112.0, BodyMix::MALE),
+        ("02_female", "ʃˈi ʃˈeɪps ʃˈɑɹp kɹˈɪstəɫ wˈeɪvz əkɹˈɔs ðə bɹˈaɪt sˈʌmɚ sˈi", "female", 205.0, BodyMix::FEMALE),
+        ("04_nasal", "nˈaɪn wˈɔɹm mˈunz ɡlˈim ɪn ðə kˈɑm ˈivnɪŋ ɹˈeɪn", "male", 112.0, BodyMix::MALE),
+    ];
+
+    let em = EmotionPreset::Natural.profile();
+    for (tag, ipa, bname, f0, mix) in phrases {
+        let plan = plan_utterance(
+            &tokenize_ipa(ipa),
+            &PlanOptions {
+                body: bname.into(),
+                t0: 0.05,
+                f0: Some(f0),
+                rate: Some(em.rate_scale),
+                ..Default::default()
+            },
+        );
+        let n_samp = (FS * (plan.end + 0.15)).round() as usize;
+        let mut vb = VocalBoxVoice::new(FS, mix);
+        vb.set_emotion(EmotionPreset::Natural);
+        vb.set_source(&SourcePatch::f0(f0));
+        vb.schedule(&plan.gestures);
+
+        let o0 = vb.airway.oral.first_node();
+        let n_or = vb.airway.n_or;
+        let mut max_p = 0.0f64;
+        let mut max_p_t = 0.0f64;
+        let mut max_p_k = 0usize;
+        let mut max_d2y = 0.0f64;
+        let (mut y1, mut y2) = (0.0f64, 0.0f64);
+        let mut out = vec![0.0f32; n_samp];
+        for (i, chunk) in out.chunks_mut(16).enumerate() {
+            vb.render(chunk);
+            for k in 0..n_or {
+                let pa = vb.airway.net.p[o0 + k].abs();
+                if pa > max_p {
+                    max_p = pa;
+                    max_p_t = vb.clock;
+                    max_p_k = k;
+                }
+            }
+            for (j, &s) in chunk.iter().enumerate() {
+                let y = s as f64;
+                if i * 16 + j >= 2 {
+                    max_d2y = max_d2y.max((y - 2.0 * y1 + y2).abs());
+                }
+                y2 = y1;
+                y1 = y;
+            }
+        }
+        assert!(
+            max_p < 20_000.0,
+            "{tag}: sealed-pocket oral pressure spiked to {max_p:.0} dyn/cm^2 at t={max_p_t:.4}s node=or{max_p_k:02}"
+        );
+        assert!(
+            max_d2y < 0.22,
+            "{tag}: mouth-closing click or fricative static spike max_d2y={max_d2y:.4}"
+        );
+    }
+}
+
+#[test]
+fn consonant_intelligibility_and_sibilant_balance_across_bodies() {
+    chimera::init();
+
+    let consonants = [
+        "p", "b", "t", "d", "k", "ɡ",
+        "f", "v", "θ", "ð", "s", "z", "ʃ", "ʒ",
+        "tʃ", "dʒ", "m", "n", "ŋ", "l", "ɹ",
+    ];
+
+    for (mix, bname, f0) in [
+        (BodyMix::MALE, "male", 112.0),
+        (BodyMix::FEMALE, "female", 205.0),
+    ] {
+        let mut c_s = 0.0f64;
+        let mut c_sh = 0.0f64;
+        for c in consonants {
+            let ipa = format!("ˈɑ{c}ɑ");
+            let plan = plan_utterance(
+                &tokenize_ipa(&ipa),
+                &PlanOptions {
+                    body: bname.into(),
+                    t0: 0.05,
+                    f0: Some(f0),
+                    ..Default::default()
+                },
+            );
+            let n_samp = (FS * (plan.end + 0.15)).round() as usize;
+            let cseg = &plan.segments[1];
+            let v2seg = &plan.segments[2];
+
+            let mut vb = VocalBoxVoice::new(FS, mix);
+            vb.set_source(&SourcePatch::f0(f0));
+            vb.schedule(&plan.gestures);
+
+            let o0 = vb.airway.oral.first_node();
+            let n_or = vb.airway.n_or;
+            let mut vb_out = vec![0.0f32; n_samp];
+            let (mut vc_sum, mut vc_n, mut max_p, mut max_d2y) = (0.0, 0usize, 0.0f64, 0.0f64);
+            let (mut y1, mut y2) = (0.0f64, 0.0f64);
+            for (i, chunk) in vb_out.chunks_mut(16).enumerate() {
+                vb.render(chunk);
+                let t = (i * 16) as f64 / FS;
+                if t >= cseg.t0 && t <= cseg.t1 + 0.035 {
+                    let mp = (0..n_or).map(|k| vb.airway.net.p[o0 + k].abs()).fold(0.0f64, f64::max);
+                    max_p = max_p.max(mp);
+                }
+                if t >= cseg.t0 + 0.01 && t <= cseg.t1 - 0.01 {
+                    vc_sum += vb.folds.voicing;
+                    vc_n += 1;
+                }
+                for (j, &s) in chunk.iter().enumerate() {
+                    let y = s as f64;
+                    if i * 16 + j >= 2 {
+                        max_d2y = max_d2y.max((y - 2.0 * y1 + y2).abs());
+                    }
+                    y2 = y1;
+                    y1 = y;
+                }
+            }
+
+            fn sl(buf: &[f32], a: f64, b: f64) -> &[f32] {
+                let ia = (a * FS).round() as usize;
+                let ib = ((b * FS).round() as usize).min(buf.len());
+                &buf[ia..ib]
+            }
+            let is_stop = matches!(c, "p" | "b" | "t" | "d" | "k" | "ɡ" | "tʃ" | "dʒ");
+            let (cw0, cw1) = if is_stop {
+                (cseg.t1 - 0.01, cseg.t1 + 0.045)
+            } else {
+                (cseg.t0 + 0.008, cseg.t1 - 0.008)
+            };
+            let v_rms = rms(sl(&vb_out, v2seg.t0 + 0.04, v2seg.t1 - 0.02)).max(1e-9);
+            let c_rms = rms(sl(&vb_out, cw0, cw1)).max(1e-9);
+            let c_db = 20.0 * (c_rms / v_rms).log10();
+            let vc = vc_sum / vc_n.max(1) as f64;
+
+            assert!(max_p < 20_000.0, "{bname} /{c}/ oral pressure spike {max_p:.0} dyn/cm^2");
+            assert!(max_d2y < 0.24, "{bname} /{c}/ transient spike max_d2y={max_d2y:.4}");
+
+            if matches!(c, "p" | "t" | "k" | "f" | "θ" | "s" | "ʃ" | "tʃ") {
+                assert!(vc < 0.05, "{bname} voiceless /{c}/ stayed voiced: vc={vc:.2}");
+            } else if matches!(c, "b" | "d" | "ɡ") {
+                assert!(vc > 0.20, "{bname} voiced stop /{c}/ devoiced: vc={vc:.2}");
+            } else {
+                assert!(vc > 0.85, "{bname} voiced consonant /{c}/ lost voicing: vc={vc:.2}");
+            }
+
+            if matches!(c, "s" | "ʃ") {
+                let min_db = if bname == "male" { -15.0 } else { -20.0 };
+                assert!(c_db > min_db, "{bname} sibilant /{c}/ too quiet: {c_db:.1} dB");
+                let ctr = spectral_centroid_hz(sl(&vb_out, cw0, cw1), FS);
+                if c == "s" {
+                    c_s = ctr;
+                } else {
+                    c_sh = ctr;
+                }
+            }
+            if c == "f" {
+                let min_db = if bname == "male" { -20.0 } else { -26.0 };
+                assert!(c_db > min_db, "{bname} /f/ too quiet: {c_db:.1} dB");
+            }
+        }
+        assert!(
+            c_s > c_sh + 800.0,
+            "{bname}: expected /s/ centroid ({c_s:.0} Hz) >> /ʃ/ centroid ({c_sh:.0} Hz)"
+        );
+    }
 }

@@ -6,7 +6,7 @@
 
 use crate::airway::network::{AirwayNetwork, Area, NoiseSpec, PortSpec, Tube, TubeSpec};
 use crate::anatomy::human::{HumanArtic, HumanBody, HumanFrame, HumanVocalTract};
-use crate::math::{js_max, js_min, js_round, smoothstep as smooth, sqrt};
+use crate::math::{js_max, js_min, js_round, pow, smoothstep as smooth, sqrt};
 use crate::physics::{C_SOUND, RHO, WALL_NASAL, WALL_SOFT, WALL_TRACHEA};
 
 #[derive(Clone, Copy, Debug)]
@@ -37,6 +37,11 @@ pub struct HumanAirway {
     pub or_areas: Vec<f64>,
     pub ph_min: Vec<f64>,
     pub or_min: Vec<f64>,
+    pub raw_ph_min: Vec<f64>,
+    pub raw_or_min: Vec<f64>,
+    /// Opt-in physical closing aerodynamics (true series minimum, closing-slit relaminarization,
+    /// target-contact gating, and lateral/nasal bypass) enabled by `VocalBoxVoice`.
+    pub physical_closing: bool,
     /// the frame of the last `apply` (None before the first)
     pub frame: Option<HumanFrame>,
     pub ph_len: f64,
@@ -143,6 +148,9 @@ impl HumanAirway {
             or_areas: vec![0.0; n_or],
             ph_min: vec![0.0; n_ph],
             or_min: vec![0.0; n_or],
+            raw_ph_min: vec![0.0; n_ph],
+            raw_or_min: vec![0.0; n_or],
+            physical_closing: false,
             frame: None,
             ph_len: 8.8,
             or_len: 8.3,
@@ -192,6 +200,10 @@ impl HumanAirway {
         let mut f = self.frame.take().unwrap_or_else(|| core::mem::take(&mut self.scratch_frame));
         self.tract.compute(a, &mut f);
         let (ph_len, or_len) = self.tract.resample(a, &f, &mut self.ph_areas, &mut self.or_areas, Some(&mut self.ph_min), Some(&mut self.or_min));
+        if self.physical_closing {
+            self.raw_ph_min.copy_from_slice(&self.ph_min);
+            self.raw_or_min.copy_from_slice(&self.or_min);
+        }
         if dt > 0.0
             && let Some(base) = &self.base
         {
@@ -273,13 +285,13 @@ impl HumanAirway {
         self.net.set_tube_targets(self.pharynx, &self.ph_areas, Some(ph_sim), Some(&self.ph_min));
         self.net.set_tube_targets(self.oral, &self.or_areas, Some(or_sim), Some(&self.or_min));
         self.net.set_port_target(self.velum_port, f.velum_port);
-        self.update_noise(&f);
+        self.update_noise(a, &f);
         self.frame = Some(f);
         self.frame.as_ref().unwrap()
     }
 
     /// Register turbulence sources: glottis, narrowest supraglottal constriction, teeth obstacle.
-    fn update_noise(&mut self, f: &HumanFrame) {
+    fn update_noise(&mut self, a: &HumanArtic, f: &HumanFrame) {
         let g = self.noise_gain;
         let mut list = core::mem::take(&mut self.noise_list);
         list.clear();
@@ -289,18 +301,69 @@ impl HumanAirway {
         let (n_ph, n_or) = (self.n_ph, self.n_or);
         let mut min_a = f64::INFINITY;
         let mut min_i: isize = -1;
+        let mut raw_tract_min = f64::INFINITY;
         for i in 0..n_ph + n_or {
             let area = if i < n_ph { self.ph_min[i] } else { self.or_min[i - n_ph] };
-            if area > 0.0 && area < min_a {
+            if (self.physical_closing || area > 0.0) && area < min_a {
                 min_a = area;
                 min_i = i as isize;
+            }
+            if self.physical_closing {
+                let raw_a = if i < n_ph { self.raw_ph_min[i] } else { self.raw_or_min[i - n_ph] };
+                if raw_a < raw_tract_min {
+                    raw_tract_min = raw_a;
+                }
             }
         }
         // narrowest open point: its jet makes frication noise. Every weight below is a smooth function
         // of geometry so sources fade in/out instead of toggling (toggling = audible noise bursts).
         let k2 = self.body.scale * self.body.scale;
-        let w_area = if min_i >= 0 { 1.0 - smooth(0.35 * k2, 0.9 * k2, min_a) } else { 0.0 };
-        if w_area > 0.0 {
+        let mut w_area = if min_i >= 0 && (!self.physical_closing || min_a > self.net.closed_area) {
+            1.0 - smooth(0.35 * k2, 0.9 * k2, min_a)
+        } else {
+            0.0
+        };
+        let mut w_closing_teeth = 1.0;
+        if self.physical_closing && w_area > 0.0 {
+            let idx = min_i as usize;
+            let raw_at_min = if idx < n_ph { self.raw_ph_min[idx] } else { self.raw_or_min[idx - n_ph] };
+            let raw_eff = js_min(raw_at_min, raw_tract_min);
+            // 1. Poiseuille slit relaminarization: as a flat labial/lingual slit closes below ~0.3 mm,
+            //    viscous wall boundary layers merge across the gap instead of blowing up Re ~ 1/sqrt(A).
+            let w_laminar = smooth(0.008 * k2, 0.055 * k2, min_a);
+            // 2. Geometric seal discrimination: when the geometric target has already sealed for a
+            //    stop/nasal (`raw_eff <= 0.004 * k2`) and `min_a` is only non-zero while `close_r`
+            //    eases tissue contact to rest, there is no free turbulent jet.
+            let w_raw_open = smooth(0.004 * k2, 0.026 * k2, raw_eff);
+            // 3. Closing-gesture vs. steady/opening jet discrimination: while an articulator is
+            //    rapidly collapsing toward closure (`old_min > raw_eff`), suppress transient pass-through
+            //    shrieks while keeping steady fricatives (`old_min ≈ raw_eff`) and plosive release bursts
+            //    (`raw_eff >= old_min`) at 100% full strength.
+            let seal_intent = 1.0 - smooth(0.025 * k2, 0.060 * k2, raw_eff);
+            let closing_speed = if self.base_dt > 0.0
+                && let Some(base) = &self.base
+            {
+                let old_min = if idx < n_ph { base[2][idx] } else { base[3][idx - n_ph] };
+                let dm_slew = js_max(0.0, (old_min - min_a) / self.base_dt);
+                let dm_raw = js_max(0.0, (old_min - raw_eff) / self.base_dt);
+                js_max(dm_slew, 0.65 * dm_raw) * seal_intent
+            } else {
+                0.0
+            };
+            let w_closing_c = 1.0 - smooth(2.5 * k2, 12.0 * k2, closing_speed);
+            // 4. Lateral buccal bypass (/l, ɫ/): midline tip contact diverts flow into the wide
+            //    cheek channels around the premolars rather than a central incisor jet.
+            let lat_open = smooth(0.05, 0.25, a.lateral);
+            // 5. Nasal shunt (/m, n, ŋ/): open velopharyngeal port vents air through the nose.
+            let nasal_shunt = smooth(0.04 * k2, 0.16 * k2, f.velum_port);
+            w_area *= w_laminar * w_raw_open * w_closing_c * (1.0 - 0.90 * lat_open);
+            w_closing_teeth = w_laminar
+                * w_raw_open
+                * (1.0 - smooth(1.0 * k2, 6.0 * k2, closing_speed))
+                * (1.0 - lat_open)
+                * (1.0 - 0.90 * nasal_shunt);
+        }
+        if w_area > 1e-4 || (!self.physical_closing && w_area > 0.0) {
             let n_ph_i = n_ph as isize;
             let n_tot = (n_ph + n_or) as isize;
             let dx_ph = self.ph_len / n_ph as f64;
@@ -320,18 +383,37 @@ impl HumanAirway {
             let fwd = to_branch((n_tot - 2).min(min_i + off));
             let bwd = to_branch(0.max(min_i - off));
             if src >= 0 && fwd >= 0 && bwd >= 0 {
-                list.push(NoiseSpec::new(src as usize, fwd as usize, bwd as usize, g.constriction * w_area).band(2600.0, 350.0));
                 // obstacle source: a narrow anterior jet impinging on the incisors (sibilants)
                 let s_min = if min_i < n_ph_i { (min_i as f64 + 0.5) * dx_ph } else { self.ph_len + ((min_i - n_ph_i) as f64 + 0.5) * dx_or };
                 let behind = (f.teeth_s - s_min) / self.body.scale;
                 let w_dist = smooth(0.15, 0.5, behind) * (1.0 - smooth(2.6, 4.0, behind));
-                let w_jet = 1.0 - smooth(0.2 * k2, 0.5 * k2, min_a);
+                let w_jet = (1.0 - smooth(0.2 * k2, 0.5 * k2, min_a)) * w_closing_teeth;
                 let wt = w_dist * w_jet;
-                if wt > 1e-3 {
-                    let teeth_i = n_ph_i + js_min((n_or - 2) as f64, js_max(0.0, js_round((f.teeth_s - self.ph_len) / dx_or))) as isize;
-                    let tb = to_branch(teeth_i);
-                    if tb >= 0 {
-                        list.push(NoiseSpec::new(src as usize, tb as usize, bwd as usize, g.teeth * wt).band(5000.0, 1200.0));
+                if self.physical_closing {
+                    let inv_sc = (1.0 / self.body.scale).clamp(0.90, 1.40);
+                    let w_ant = smooth(self.ph_len + 0.30 * self.or_len, self.ph_len + 0.60 * self.or_len, s_min);
+                    let c_lp = (2550.0 + 450.0 * w_ant) * pow(inv_sc, 0.30);
+                    let c_hp = (460.0 + 140.0 * w_ant) * pow(inv_sc, 0.25);
+                    let w_constrict = w_area * (1.0 - 0.35 * wt);
+                    if w_constrict > 1e-4 {
+                        list.push(NoiseSpec::new(src as usize, fwd as usize, bwd as usize, g.constriction * w_constrict).band(c_lp, c_hp));
+                    }
+                    if wt > 1e-3 {
+                        let teeth_i = n_ph_i + js_min((n_or - 2) as f64, js_max(0.0, js_round((f.teeth_s - self.ph_len) / dx_or))) as isize;
+                        let tb = to_branch(teeth_i);
+                        if tb >= 0 {
+                            let t_scale = pow(inv_sc, 0.35);
+                            list.push(NoiseSpec::new(src as usize, tb as usize, bwd as usize, g.teeth * wt).band(5400.0 * t_scale, 1300.0 * t_scale));
+                        }
+                    }
+                } else {
+                    list.push(NoiseSpec::new(src as usize, fwd as usize, bwd as usize, g.constriction * w_area).band(2600.0, 350.0));
+                    if wt > 1e-3 {
+                        let teeth_i = n_ph_i + js_min((n_or - 2) as f64, js_max(0.0, js_round((f.teeth_s - self.ph_len) / dx_or))) as isize;
+                        let tb = to_branch(teeth_i);
+                        if tb >= 0 {
+                            list.push(NoiseSpec::new(src as usize, tb as usize, bwd as usize, g.teeth * wt).band(5000.0, 1200.0));
+                        }
                     }
                 }
             }

@@ -16,7 +16,7 @@
 //!
 //! Real time: `step()` and the control-rate setters allocate nothing.
 
-use crate::math::{PI, Rng, cbrt, exp, js_max, js_min, sqrt};
+use crate::math::{PI, Rng, cbrt, exp, js_max, js_min, smoothstep, sqrt};
 use crate::physics::{C_SOUND, MU, NU, RE_CRIT, RHO, RHO_C2, WallParams};
 
 /// Initial cross-sectional area(s) of a tube.
@@ -325,6 +325,10 @@ pub struct AirwayNetwork {
     pub viscous_omega: f64,
     /// scale on turbulence noise gain
     pub noise_scale: f64,
+    /// opt-in physical closing/opening slit & wall stabilization (default false)
+    pub stabilize_closing: bool,
+    /// anatomical body scale factor (cm-ratio) for body-proportional slit stabilization
+    pub body_scale: f64,
     /// last output sample (radiated pressure derivative)
     pub out: f64,
 }
@@ -419,6 +423,8 @@ impl AirwayNetwork {
             viscous_scale: 1.0,
             viscous_omega: 2.0 * PI * 700.0,
             noise_scale: 1.0,
+            stabilize_closing: false,
+            body_scale: 1.0,
             out: 0.0,
         }
     }
@@ -812,12 +818,16 @@ impl AirwayNetwork {
                 self.half_r[k] = self.wall_perim[k] * d * sa * ia * ia * self.visc_f[k];
                 let v = (if a > min_a { a } else { min_a }) * d;
                 if vol_on {
-                    let raw = -(v - self.vol[k]) * inv_t;
+                    let mut raw = -(v - self.vol[k]) * inv_t;
+                    if self.stabilize_closing && raw > 0.0 && self.p[k] > 6_500.0 {
+                        // Compliant mucosa/cheek yield: positive kinematic tongue/lip displacement
+                        // cannot compress a trapped pocket arbitrarily above lung driving pressure.
+                        raw *= 1.0 - smoothstep(6_500.0, 13_500.0, self.p[k]);
+                    }
                     let ae = if amin[k] < a { amin[k] } else { a }; // a node sealed at its minimum cannot hold air either
                     if raw != 0.0 && ae < sq {
                         let tt = ae / sq;
                         let keep = tt * tt * (3.0 - 2.0 * tt);
-                        inj[k] += raw * keep;
                         let sp = raw * (1.0 - keep);
                         let (s0, s1) = (self.nbr_start[k], self.nbr_start[k + 1]);
                         let mut n_open = 0usize;
@@ -828,6 +838,7 @@ impl AirwayNetwork {
                             }
                         }
                         if n_open > 0 {
+                            inj[k] += raw * keep;
                             let share = sp / n_open as f64;
                             for e in s0..s1 {
                                 let m = self.nbr_list[e];
@@ -835,7 +846,11 @@ impl AirwayNetwork {
                                     inj[m] += share;
                                 }
                             }
-                        } // else: fully sealed pocket, the squeezed air leaves laterally (absorbed)
+                        } else if !self.stabilize_closing || raw < 0.0 {
+                            // sealed/sealing pocket: positive squeeze compression leaves laterally (absorbed)
+                            // when stabilize_closing is enabled so trapped cells don't pressurize to 30x lung pressure
+                            inj[k] += raw * keep;
+                        }
                     } else {
                         inj[k] += raw;
                     }
@@ -868,6 +883,9 @@ impl AirwayNetwork {
         let half_rho = 0.5 * RHO;
         let enable_energy_safe = self.energy_safe;
         let symmetric = self.symmetric_kinetic;
+        let stabilize = self.stabilize_closing;
+        let b_scale = self.body_scale;
+        let b_scale2 = b_scale * b_scale;
         {
             // the arrays the branch loop reads, borrowed once (checked indexing costs nothing
             // measurable here, against get_unchecked)
@@ -890,7 +908,7 @@ impl AirwayNetwork {
                 let a = b_a[j];
                 let b = b_b[j];
                 let l: f64;
-                let r: f64;
+                let mut r: f64;
                 let mut kf: f64;
                 let mut kb: f64;
                 let a_eff: f64;
@@ -900,7 +918,8 @@ impl AirwayNetwork {
                     let ma = amin[a];
                     let mb = amin[b];
                     a_eff = if ma < mb { ma } else { mb };
-                    if (if aa < ab { aa } else { ab }) < closed || a_eff < closed {
+                    let a_min_ab = if aa < ab { aa } else { ab };
+                    if a_min_ab < closed || a_eff < closed {
                         u_arr[j] = 0.0;
                         mom[j] = 0.0;
                         branch_area[j] = a_eff;
@@ -911,6 +930,16 @@ impl AirwayNetwork {
                     l = half_rho * (half_l[a] + half_l[b]);
                     // viscous: R = S·l/A² · sqrt(ρμω/2) with S = perimeter of each half-section
                     r = 0.5 * visc * (half_r[a] + half_r[b]);
+                    if stabilize {
+                        let a_slit = if a_min_ab < a_eff { a_min_ab } else { a_eff };
+                        let slit_hi = 0.022 * b_scale2;
+                        if a_slit < slit_hi {
+                            // Bounded HF impedance damper at tissue contact without choking moving-wall drainage
+                            let w_slit = 1.0 - smoothstep(0.004 * b_scale2, slit_hi, a_slit);
+                            let a_damp = js_max(a_slit, 0.008 * b_scale2);
+                            r += w_slit * ((0.08 * RHO * C_SOUND) / a_damp);
+                        }
+                    }
                     // Borda–Carnot: the jet leaving the narrowest point of the upstream node expands into
                     // the downstream node (sub-section minima make short constrictions lossy as they should be)
                     let ima = inv_amin[a];
@@ -994,26 +1023,52 @@ impl AirwayNetwork {
 
         // 4) walls (velocity at half step from p(n), displacement integrates)
         let mut wall_rad_sum = 0.0;
+        let cl = self.closed_area;
+        let (wv_damp, wy_damp, p_seal_damp) = if stabilize {
+            (exp(-t / 0.00008), exp(-t / 0.0020), exp(-t / 0.0015))
+        } else {
+            (1.0, 1.0, 1.0)
+        };
         for k in 0..n {
             if !self.has_wall[k] {
                 continue;
             }
-            let m = self.wall_m[k];
-            let r = self.wall_r[k];
-            let v = ((m * inv_t - 0.5 * r) * self.wall_v[k] + self.p[k] - self.wall_k[k] * self.wall_y[k]) / (m * inv_t + 0.5 * r);
-            self.wall_v[k] = v;
-            self.wall_y[k] += t * v;
-            let sa = if self.area[k] > min_a { self.sqrt_a[k] } else { sqrt(min_a) };
-            let uw = self.wall_perim[k] * sa * self.dx[k] * v;
-            self.wall_u[k] = uw;
-            self.flow_sum[k] -= uw;
-            wall_rad_sum += uw * self.wall_rad[k];
+            if stabilize {
+                let ae = js_min(self.area[k], self.amin[k]);
+                if ae < cl {
+                    self.wall_v[k] *= wv_damp;
+                    self.wall_y[k] *= wy_damp;
+                    self.wall_u[k] = 0.0;
+                    continue;
+                }
+                let m = self.wall_m[k];
+                let r = self.wall_r[k];
+                let v = ((m * inv_t - 0.5 * r) * self.wall_v[k] + self.p[k] - self.wall_k[k] * self.wall_y[k]) / (m * inv_t + 0.5 * r);
+                self.wall_v[k] = v;
+                self.wall_y[k] += t * v;
+                let sa = sqrt(ae);
+                let w_wall = smoothstep(cl, 0.005 * b_scale2, ae);
+                let uw = self.wall_perim[k] * sa * self.dx[k] * v * w_wall;
+                self.wall_u[k] = uw;
+                self.flow_sum[k] -= uw;
+                wall_rad_sum += uw * self.wall_rad[k];
+            } else {
+                let m = self.wall_m[k];
+                let r = self.wall_r[k];
+                let v = ((m * inv_t - 0.5 * r) * self.wall_v[k] + self.p[k] - self.wall_k[k] * self.wall_y[k]) / (m * inv_t + 0.5 * r);
+                self.wall_v[k] = v;
+                self.wall_y[k] += t * v;
+                let sa = if self.area[k] > min_a { self.sqrt_a[k] } else { sqrt(min_a) };
+                let uw = self.wall_perim[k] * sa * self.dx[k] * v;
+                self.wall_u[k] = uw;
+                self.flow_sum[k] -= uw;
+                wall_rad_sum += uw * self.wall_rad[k];
+            }
         }
 
         // 5) nodes (radiation loads handled semi-implicitly)
         let t2 = t * t;
         let mut rad_total = wall_rad_sum;
-        let cl = self.closed_area;
         for k in 0..n {
             if self.fixed[k] {
                 continue;
@@ -1039,6 +1094,9 @@ impl AirwayNetwork {
                     }
                     if cnt > 0 {
                         self.p[k] += 0.02 * (sum / cnt as f64 - self.p[k]);
+                    } else if stabilize {
+                        // Isolated sealed pinch pocket: bleed residual squeeze compression smoothly into compliant mucosa
+                        self.p[k] *= p_seal_damp;
                     }
                 }
                 if rr >= 0 {

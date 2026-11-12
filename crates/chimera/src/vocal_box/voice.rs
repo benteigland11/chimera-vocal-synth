@@ -532,6 +532,9 @@ impl VocalBoxVoice {
         let fs = fs_clean * m as f64;
         let mut airway = HumanAirway::new(fs, anatomy.body);
         airway.max_area_rate = 65.0;
+        airway.physical_closing = true;
+        airway.net.stabilize_closing = true;
+        airway.net.body_scale = anatomy.body.scale;
 
         let sc = anatomy.vtl_scale;
         let body_gain = if sc >= 1.0 {
@@ -546,8 +549,8 @@ impl VocalBoxVoice {
         // keeping lingual groove noise (`constriction`) moderate so /s/ stays bright and anterior
         // (labiodental /f, v/ modulate `constriction` dynamically in `control()`).
         let inv_sc = clamp(1.0 / sc, 1.0, 1.40);
-        airway.noise_gain.teeth *= 1.44 * pow(inv_sc, 3.3);
-        airway.noise_gain.constriction *= 1.02 * pow(clamp(sc, 0.72, 1.0), 0.65);
+        airway.noise_gain.teeth *= 1.18 * pow(inv_sc, 1.85);
+        airway.noise_gain.constriction *= 1.02 * pow(clamp(sc, 0.72, 1.0), 0.35);
         airway.noise_gain.glottis *= 1.06 * pow(inv_sc, 2.0);
 
         // Pre-warm the airway's slew-limiter scratch buffer at construction so `render()` allocates 0 bytes!
@@ -993,7 +996,6 @@ impl VocalBoxVoice {
         let mut breath_act = 0.0;
         let mut breath_val = 0.0;
         let mut f0_target = self.source.f0 * f0_scale_eff;
-        let mut non_lat_sealing = false;
 
         if self.score.size() > 0 {
             self.score.blend_all(t, &mut self.blend);
@@ -1007,27 +1009,31 @@ impl VocalBoxVoice {
                     vel.weight *= smoothstep(2.4, 3.5, vel.weight);
                 }
             }
-            // 2. Seal Lateral side-bypass ONLY when a non-lateral stop/coronal consonant is active:
+            // 2. Seal Lateral side-bypass smoothly when a non-lateral stop/coronal consonant is active:
             //    Every lateral (/l, ɫ, ɭ, ɬ, ɮ/) puts TtY and Lateral in the same dominant gesture,
             //    so `TtY.weight - Lateral.weight` isolates non-lateral coronal weight without ever
             //    touching /l, ɫ/ alone, while sealing cleanly across /ɫ-tʃ/ ("small change") and
             //    holding /g-l/ ("gleam") sealed through the velar stop closure.
             let lat_w = self.blend[ArticKey::Lateral.index()].weight;
             let non_lat_coronal_w = self.blend[ArticKey::TtY.index()].weight - lat_w;
-            non_lat_sealing = non_lat_coronal_w > 8.0
-                || (self.blend[ArticKey::TbY.index()].weight > 6.0
-                    && self.blend[ArticKey::TbY.index()].value > 8.0)
-                || (self.blend[ArticKey::LipAp.index()].weight > 6.0
-                    && self.blend[ArticKey::LipAp.index()].value < 0.0);
-            if non_lat_sealing {
+            let tb = self.blend[ArticKey::TbY.index()];
+            let lip = self.blend[ArticKey::LipAp.index()];
+            let seal_act = js_max(
+                smoothstep(2.5, 6.0, non_lat_coronal_w),
+                js_max(
+                    smoothstep(3.5, 7.0, tb.weight) * smoothstep(7.6, 8.2, tb.value),
+                    smoothstep(3.5, 7.0, lip.weight) * smoothstep(0.0, 0.12, -lip.value),
+                ),
+            );
+            if seal_act > 0.0 {
                 let lat = &mut self.blend[ArticKey::Lateral.index()];
-                lat.value = 0.0;
-                lat.weight = 48.0;
-                lat.speed = 2.6;
+                lat.value *= 1.0 - seal_act;
+                lat.weight = js_max(lat.weight, 48.0 * seal_act);
+                lat.speed = js_max(lat.speed, 1.25 + 1.15 * seal_act);
             }
-            // 3. Nimble vowel tracking transitioning to calibrated consonant speed
-            //    (keeping LipAp locked at 1.00x during /f, v/ labiodental tucks):
-            let lab_tuck = self.blend[ArticKey::Labiodental.index()].weight > 0.2;
+            // 3. Nimble vowel tracking transitioning smoothly to calibrated consonant speed
+            //    (keeping LipAp locked near 1.00x during /f, v/ labiodental tucks):
+            let lab_tuck = smoothstep(0.05, 0.35, self.blend[ArticKey::Labiodental.index()].weight);
             for k in [
                 ArticKey::Jaw,
                 ArticKey::TbX,
@@ -1041,13 +1047,12 @@ impl VocalBoxVoice {
                 ArticKey::LipWidth,
             ] {
                 let i = k.index();
-                self.artic.speed[i] = if k == ArticKey::LipAp && lab_tuck {
-                    1.00
-                } else if self.blend[i].weight > 5.0 {
-                    1.06
-                } else {
-                    1.55
-                };
+                let w_cons = smoothstep(1.5, 6.0, self.blend[i].weight);
+                let mut sp = 1.55 + (1.06 - 1.55) * w_cons;
+                if k == ArticKey::LipAp {
+                    sp += (1.00 - sp) * lab_tuck;
+                }
+                self.artic.speed[i] = sp;
             }
             let b = &self.blend;
             self.artic.step(dt, Some(&b[..]), 0.05);
@@ -1061,8 +1066,8 @@ impl VocalBoxVoice {
                 0.0
             };
             let abd = if self.source.voiced {
-                let vfric_boost = if is_vfric { 1.35 } else { 1.0 };
-                self.base_abduction + ab.value * vfric_boost * ab_act * k2
+                let v_scale = if is_vfric { 0.55 } else { 1.0 };
+                self.base_abduction + ab.value * ab_act * k2 * v_scale
             } else {
                 js_max(self.base_abduction, ab.value * ab_act * self.anatomy.fold_area_scale)
             };
@@ -1147,7 +1152,7 @@ impl VocalBoxVoice {
         // otherwise creeps asymptotically > 0 for >100 ms; `lat_eff` seals Lateral in finite time
         // (smoothly slew-limited by `HumanAirway::apply` so zero step click can occur).
         let lat_eff = |raw_lat: f64| -> f64 {
-            if non_lat_sealing || raw_lat <= 0.12 {
+            if raw_lat <= 0.12 {
                 0.0
             } else {
                 (raw_lat - 0.12) / 0.88
@@ -1157,7 +1162,7 @@ impl VocalBoxVoice {
         x.lateral = lat_eff(x.lateral);
         let inv_sc = clamp(1.0 / self.anatomy.vtl_scale, 1.0, 1.40);
         self.airway.noise_gain.constriction = self.base_constriction_noise
-            * (1.0 + 0.70 * pow(inv_sc, 1.8) * clamp(x.labiodental, 0.0, 1.0));
+            * (1.0 + 0.18 * pow(inv_sc, 1.1) * clamp(x.labiodental, 0.0, 1.0));
         // Slit-aspect Reynolds jet turbulence (Stevens 1998; Hanson 1997): circular-pipe Re ~ U / sqrt(A)
         // under-predicts high-aspect-ratio glottal slit aspiration on smaller Female/Child larynges
         // (kf < 1.0); restore balanced ~20 dB HNR open-phase warmth without adding rasp on Male.

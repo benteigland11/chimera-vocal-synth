@@ -293,7 +293,7 @@ impl TwoMassGlottis {
 
         // Aerodynamic & laryngeal voicing gates
         let k2_est = clamp(sqrt(js_max(p.amplitude, 0.008) / 0.17), 0.52, 1.05);
-        let p_gate = smoothstep(0.65 * pth_cm_h2o, 1.30 * pth_cm_h2o, dp_cm_h2o);
+        let p_gate = smoothstep(0.55 * pth_cm_h2o, 1.15 * pth_cm_h2o, dp_cm_h2o);
         let abd_gate = 1.0 - smoothstep(0.10 * k2_est, 0.205 * k2_est, self.abduct_sm);
         let drive_gate = p_gate * abd_gate * (1.0 - self.closure_sm);
 
@@ -321,8 +321,8 @@ impl TwoMassGlottis {
         let kc = 0.56 * omega * omega;
 
         // Supra-threshold dissipative vena-contracta drive
-        let p_mean = clamp((dp_cm_h2o - 0.65 * pth_cm_h2o) / 6.2, 0.0, 2.4);
-        let p_norm = clamp(0.65 + 0.52 * p_mean + 0.03 * dp_ac_cm_h2o, 0.0, 2.5)
+        let p_mean = clamp((dp_cm_h2o - 0.55 * pth_cm_h2o) / 6.2, 0.0, 2.4);
+        let p_norm = clamp(0.76 + 0.42 * p_mean + 0.03 * dp_ac_cm_h2o, 0.0, 2.5)
             * smoothstep(0.0, 0.42, drive_gate)
             * if self.amp_sm > 1e-4 { 1.0 } else { 0.0 };
 
@@ -336,7 +336,7 @@ impl TwoMassGlottis {
         let c1_open = 2.0 * 0.082 * (1.14 * omega);
         let c2_open = 2.0 * 0.330 * (0.88 * omega);
         let r_target = 0.0255
-            * (0.80 + 0.26 * clamp(p_mean, 0.0, 1.6))
+            * (0.88 + 0.17 * clamp(p_mean, 0.0, 1.8))
             * smoothstep(0.02, 0.26, drive_gate)
             * self.cycle_amp_sm;
 
