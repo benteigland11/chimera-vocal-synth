@@ -532,3 +532,127 @@ fn connected_speech_multi_syllable_has_zero_dropouts_in_both_valve_modes() {
     }
 }
 
+#[test]
+fn speech_and_singing_are_dynamic_and_free_of_clicks_or_flat_topping() {
+    chimera::init();
+
+    // 1. Sibilant-to-vowel VOT transitions ("ˈʃɑpɑ ˈsɑmɑ") in both valve modes must be C1-smooth
+    //    without single-sample state-teleport pops (bounded |Δ²x| / rms) or brick-wall flat-topping.
+    let vot_plan = plan_utterance(
+        &tokenize_ipa("ˈʃɑpɑ ˈsɑmɑ"),
+        &PlanOptions {
+            body: BodyMix::FEMALE,
+            t0: 0.05,
+            f0: Some(210.0),
+            ..Default::default()
+        },
+    );
+    for (two_mass, preset) in [
+        (false, EmotionPreset::Natural),
+        (true, EmotionPreset::Warm),
+        (true, EmotionPreset::Dramatic),
+        (true, EmotionPreset::Angry),
+    ] {
+        let mut v = VocalBoxVoice::new(FS, BodyMix::FEMALE);
+        v.set_two_mass(two_mass);
+        v.set_emotion(preset);
+        v.schedule(&vot_plan.gestures);
+        let mut out = vec![0.0f32; ((vot_plan.end + 0.20) * FS).round() as usize];
+        v.render(&mut out);
+
+        let r = rms(&out);
+        assert!(r > 0.015, "expected audible speech for {preset:?} (two_mass={two_mass}), got rms={r}");
+
+        // Check zero consecutive brick-wall flat-topped peak samples (|x[i]| > 0.65 and |x[i]-x[i-1]| < 1e-6)
+        let mut max_flat_run = 0usize;
+        let mut cur_run = 0usize;
+        for w in out.windows(2) {
+            if w[0].abs() > 0.65 && (w[1] - w[0]).abs() < 1.0e-6 {
+                cur_run += 1;
+                max_flat_run = max_flat_run.max(cur_run);
+            } else {
+                cur_run = 0;
+            }
+        }
+        assert!(
+            max_flat_run <= 1,
+            "{preset:?} (two_mass={two_mass}) exhibited brick-wall flat-topped peak run of {max_flat_run} steps"
+        );
+
+        // Check 2nd-derivative smoothness in voiced windows (after sibilant frication settles)
+        // specifically across VOT onset of the two vowels (segments[1] and segments[5])
+        for &seg_idx in &[1usize, 5usize] {
+            let seg = &vot_plan.segments[seg_idx];
+            // Inspect from 15 ms before vowel start through 60 ms into vowel VOT
+            let ia = ((seg.t0 + 0.008) * FS).round() as usize;
+            let ib = ((seg.t0 + 0.075) * FS).round() as usize;
+            let win = &out[ia..ib.min(out.len())];
+            let win_rms = rms(win).max(0.01);
+            let mut max_d2 = 0.0f64;
+            for w in win.windows(3) {
+                let d2 = ((w[2] as f64) - 2.0 * (w[1] as f64) + (w[0] as f64)).abs();
+                max_d2 = max_d2.max(d2);
+            }
+            assert!(
+                max_d2 / win_rms < 2.2,
+                "VOT pop/click detected in {preset:?} (two_mass={two_mass}) at seg {seg_idx}: max_d2/rms={:.2}",
+                max_d2 / win_rms
+            );
+        }
+    }
+
+    // 2. Loud operatic high singing must preserve dynamic crest factor (> 10.5 dB) with 0 flat-topped plateaus
+    let syl = |txt: &str, onset: &[&str], nuc: &str| Syllable {
+        text: txt.into(),
+        onset: onset.iter().map(|s| Segment::new(s)).collect(),
+        nucleus: Segment::new(nuc),
+        word_end: true,
+        ..Default::default()
+    };
+    let notes = vec![
+        SungNote {
+            midi: 69.0, // A4 = 440 Hz
+            beats: 2.0,
+            syl: syl("ah", &[], "ɑ"),
+        },
+        SungNote {
+            midi: 72.0, // C5 = 523.25 Hz
+            beats: 2.0,
+            syl: syl("la", &["l"], "ɑ"),
+        },
+    ];
+    let song = plan_song(
+        &notes,
+        &SongOptions {
+            body: BodyMix::FEMALE,
+            bpm: 96.0,
+            t0: 0.20,
+            vibrato: 24.0,
+        },
+    );
+    let mut vs = VocalBoxVoice::new(FS, BodyMix::FEMALE);
+    vs.musical_pitch_lock = true;
+    vs.set_two_mass(true);
+    vs.set_emotion(EmotionPreset::Operatic);
+    vs.set_source(&SourcePatch::f0(midi_to_hz(69.0)));
+    vs.schedule(&song.gestures);
+    let mut song_out = vec![0.0f32; ((song.end + 0.25) * FS).round() as usize];
+    vs.render(&mut song_out);
+
+    let peak = song_out.iter().fold(0.0f64, |m, &x| m.max((x as f64).abs()));
+    let song_rms = rms(&song_out);
+    let crest_db = 20.0 * (peak / song_rms).log10();
+    assert!(
+        crest_db > 6.5 && peak < 0.86,
+        "Operatic singing hit nonlinear soft-clip or lost crest factor: crest={crest_db:.1} dB, peak={peak:.3}"
+    );
+    let flat_plateaus = song_out
+        .windows(3)
+        .filter(|w| {
+            w[0].abs() > 0.65 && (w[1] - w[0]).abs() < 1.0e-6 && (w[2] - w[1]).abs() < 1.0e-6
+        })
+        .count();
+    assert_eq!(flat_plateaus, 0, "Operatic singing had {flat_plateaus} flat-topped peak plateaus");
+}
+
+

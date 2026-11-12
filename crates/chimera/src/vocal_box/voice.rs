@@ -22,7 +22,8 @@ use crate::anatomy::human::{
 use crate::control::articulators::ArticulatorBank;
 use crate::control::score::{Blended, ControlKey, Gesture, GestureScore, N_CONTROL};
 use crate::math::{
-    PI, clamp, exp, js_max, js_min, js_round, js_sign, js_trunc_i32, pow, sqrt, tanh,
+    PI, clamp, exp, js_max, js_min, js_round, js_sign, js_trunc_i32, log2, pow, smoothstep, sqrt,
+    tanh,
 };
 use crate::physics::CM_H2O;
 use crate::voice::human_airway::HumanAirway;
@@ -149,6 +150,11 @@ impl EmotionPreset {
     }
 
     /// Physiological respiratory, laryngeal, prosodic, and anatomical posture parameters.
+    ///
+    /// Note: `epilarynx` is bounded to `<= 0.62` and `ventricular` to `<= 0.05` so the
+    /// epilaryngeal exit remains strictly above `0.90 * k^2` (`w_area == 0` in `HumanAirway`),
+    /// producing pure acoustic singer's-formant impedance ring without false-positive 2600 Hz
+    /// oral-constriction hiss on open vowels.
     #[inline]
     pub const fn profile(self) -> EmotionProfile {
         match self {
@@ -156,176 +162,176 @@ impl EmotionPreset {
                 pressure_cm_h2o: 8.0,
                 tension: 0.50,
                 brightness: 0.30,
-                breathiness: 0.14,
-                roughness: 0.06,
+                breathiness: 0.13,
+                roughness: 0.05,
                 fry: 0.0,
                 whisper: false,
                 larynx_cm: 0.0,
                 epilarynx: 0.14,
                 ventricular: 0.0,
-                glottis_noise_scale: 1.0,
+                glottis_noise_scale: 0.95,
                 f0_scale: 1.00,
                 rate_scale: 1.00,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 5.8,
-                drift_cents: 4.5,
+                drift_cents: 4.0,
             },
             Self::Warm => EmotionProfile {
-                pressure_cm_h2o: 7.5,
+                pressure_cm_h2o: 7.6,
                 tension: 0.42,
                 brightness: 0.16,
-                breathiness: 0.22,
-                roughness: 0.05,
+                breathiness: 0.20,
+                roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
                 larynx_cm: -0.28,
                 epilarynx: 0.06,
                 ventricular: 0.0,
-                glottis_noise_scale: 1.05,
+                glottis_noise_scale: 1.00,
                 f0_scale: 0.95,
                 rate_scale: 0.95,
                 vibrato_depth_cents: 8.0,
                 vibrato_rate_hz: 5.4,
-                drift_cents: 4.5,
+                drift_cents: 4.0,
             },
             Self::Tender => EmotionProfile {
                 pressure_cm_h2o: 5.8,
                 tension: 0.32,
                 brightness: 0.10,
-                breathiness: 0.42,
+                breathiness: 0.40,
                 roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
                 larynx_cm: -0.20,
                 epilarynx: 0.04,
                 ventricular: 0.0,
-                glottis_noise_scale: 1.20,
+                glottis_noise_scale: 1.15,
                 f0_scale: 0.97,
-                rate_scale: 0.89,
+                rate_scale: 0.90,
                 vibrato_depth_cents: 6.0,
                 vibrato_rate_hz: 5.3,
-                drift_cents: 4.0,
+                drift_cents: 3.5,
             },
             Self::Joyful => EmotionProfile {
-                pressure_cm_h2o: 9.6,
+                pressure_cm_h2o: 9.5,
                 tension: 0.60,
                 brightness: 0.52,
-                breathiness: 0.10,
-                roughness: 0.06,
+                breathiness: 0.09,
+                roughness: 0.05,
                 fry: 0.0,
                 whisper: false,
                 larynx_cm: 0.20,
                 epilarynx: 0.32,
                 ventricular: 0.0,
-                glottis_noise_scale: 0.95,
+                glottis_noise_scale: 0.90,
                 f0_scale: 1.18,
-                rate_scale: 1.09,
+                rate_scale: 1.08,
                 vibrato_depth_cents: 10.0,
-                vibrato_rate_hz: 6.1,
-                drift_cents: 5.5,
+                vibrato_rate_hz: 6.0,
+                drift_cents: 5.0,
             },
             Self::Dramatic => EmotionProfile {
-                pressure_cm_h2o: 11.0,
-                tension: 0.68,
-                brightness: 0.56,
-                breathiness: 0.08,
-                roughness: 0.10,
+                pressure_cm_h2o: 10.6,
+                tension: 0.66,
+                brightness: 0.54,
+                breathiness: 0.07,
+                roughness: 0.06,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: -0.32,
-                epilarynx: 0.54,
-                ventricular: 0.08,
-                glottis_noise_scale: 1.0,
+                larynx_cm: -0.34,
+                epilarynx: 0.50,
+                ventricular: 0.02,
+                glottis_noise_scale: 0.92,
                 f0_scale: 1.08,
                 rate_scale: 0.93,
-                vibrato_depth_cents: 24.0,
+                vibrato_depth_cents: 22.0,
                 vibrato_rate_hz: 5.7,
-                drift_cents: 6.0,
+                drift_cents: 5.0,
             },
             Self::Melancholic => EmotionProfile {
                 pressure_cm_h2o: 6.2,
                 tension: 0.35,
                 brightness: 0.12,
-                breathiness: 0.36,
-                roughness: 0.08,
-                fry: 0.08,
+                breathiness: 0.34,
+                roughness: 0.06,
+                fry: 0.06,
                 whisper: false,
                 larynx_cm: -0.26,
                 epilarynx: 0.04,
                 ventricular: 0.0,
-                glottis_noise_scale: 1.15,
+                glottis_noise_scale: 1.10,
                 f0_scale: 0.88,
-                rate_scale: 0.85,
+                rate_scale: 0.86,
                 vibrato_depth_cents: 6.0,
                 vibrato_rate_hz: 5.0,
-                drift_cents: 7.0,
+                drift_cents: 6.0,
             },
             Self::Angry => EmotionProfile {
-                pressure_cm_h2o: 12.2,
-                tension: 0.84,
-                brightness: 0.78,
-                breathiness: 0.05,
-                roughness: 0.26,
+                pressure_cm_h2o: 10.8,
+                tension: 0.78,
+                brightness: 0.68,
+                breathiness: 0.04,
+                roughness: 0.09,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.24,
+                larynx_cm: 0.22,
                 epilarynx: 0.48,
-                ventricular: 0.24,
-                glottis_noise_scale: 1.10,
+                ventricular: 0.04,
+                glottis_noise_scale: 0.95,
                 f0_scale: 1.15,
-                rate_scale: 1.10,
+                rate_scale: 1.08,
                 vibrato_depth_cents: 0.0,
-                vibrato_rate_hz: 6.4,
-                drift_cents: 8.5,
+                vibrato_rate_hz: 6.2,
+                drift_cents: 6.5,
             },
             Self::Pressed => EmotionProfile {
-                pressure_cm_h2o: 9.8,
-                tension: 0.90,
-                brightness: 0.88,
+                pressure_cm_h2o: 9.6,
+                tension: 0.88,
+                brightness: 0.86,
                 breathiness: 0.02,
-                roughness: 0.08,
+                roughness: 0.06,
                 fry: 0.0,
                 whisper: false,
                 larynx_cm: 0.18,
-                epilarynx: 0.38,
-                ventricular: 0.14,
+                epilarynx: 0.42,
+                ventricular: 0.04,
                 glottis_noise_scale: 0.85,
                 f0_scale: 1.03,
                 rate_scale: 1.00,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 5.8,
-                drift_cents: 4.0,
+                drift_cents: 3.5,
             },
             Self::Breathy => EmotionProfile {
-                pressure_cm_h2o: 7.0,
+                pressure_cm_h2o: 7.2,
                 tension: 0.20,
                 brightness: 0.04,
-                breathiness: 0.78,
-                roughness: 0.06,
+                breathiness: 0.76,
+                roughness: 0.05,
                 fry: 0.0,
                 whisper: false,
                 larynx_cm: -0.10,
                 epilarynx: 0.02,
                 ventricular: 0.0,
-                glottis_noise_scale: 1.45,
+                glottis_noise_scale: 1.38,
                 f0_scale: 0.96,
                 rate_scale: 0.95,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 5.5,
-                drift_cents: 5.0,
+                drift_cents: 4.5,
             },
             Self::Whisper => EmotionProfile {
-                pressure_cm_h2o: 7.4,
-                tension: 0.32,
+                pressure_cm_h2o: 9.2,
+                tension: 0.34,
                 brightness: 0.22,
-                breathiness: 0.95,
-                roughness: 0.05,
+                breathiness: 0.92,
+                roughness: 0.04,
                 fry: 0.0,
                 whisper: true,
                 larynx_cm: 0.0,
-                epilarynx: 0.14,
-                ventricular: 0.08,
-                glottis_noise_scale: 1.65,
+                epilarynx: 0.24,
+                ventricular: 0.04,
+                glottis_noise_scale: 3.20,
                 f0_scale: 1.00,
                 rate_scale: 0.95,
                 vibrato_depth_cents: 0.0,
@@ -333,58 +339,58 @@ impl EmotionPreset {
                 drift_cents: 3.0,
             },
             Self::Fry => EmotionProfile {
-                pressure_cm_h2o: 5.6,
+                pressure_cm_h2o: 5.8,
                 tension: 0.56,
-                brightness: 0.36,
-                breathiness: 0.08,
-                roughness: 0.24,
-                fry: 0.85,
+                brightness: 0.34,
+                breathiness: 0.06,
+                roughness: 0.06,
+                fry: 0.80,
                 whisper: false,
                 larynx_cm: -0.16,
-                epilarynx: 0.12,
-                ventricular: 0.10,
-                glottis_noise_scale: 0.95,
-                f0_scale: 0.66,
-                rate_scale: 0.92,
+                epilarynx: 0.14,
+                ventricular: 0.03,
+                glottis_noise_scale: 0.90,
+                f0_scale: 0.72,
+                rate_scale: 0.93,
                 vibrato_depth_cents: 0.0,
                 vibrato_rate_hz: 5.0,
-                drift_cents: 6.5,
+                drift_cents: 4.5,
             },
             Self::Operatic => EmotionProfile {
-                pressure_cm_h2o: 11.2,
+                pressure_cm_h2o: 11.0,
                 tension: 0.64,
-                brightness: 0.58,
-                breathiness: 0.06,
+                brightness: 0.60,
+                breathiness: 0.05,
                 roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
                 larynx_cm: -0.46,
-                epilarynx: 0.76,
+                epilarynx: 0.62,
                 ventricular: 0.0,
-                glottis_noise_scale: 0.90,
+                glottis_noise_scale: 0.88,
                 f0_scale: 1.06,
                 rate_scale: 0.92,
-                vibrato_depth_cents: 42.0,
+                vibrato_depth_cents: 40.0,
                 vibrato_rate_hz: 5.8,
                 drift_cents: 3.5,
             },
             Self::Pop => EmotionProfile {
-                pressure_cm_h2o: 10.2,
-                tension: 0.70,
-                brightness: 0.66,
-                breathiness: 0.12,
-                roughness: 0.05,
+                pressure_cm_h2o: 10.0,
+                tension: 0.68,
+                brightness: 0.64,
+                breathiness: 0.10,
+                roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.20,
-                epilarynx: 0.50,
+                larynx_cm: 0.18,
+                epilarynx: 0.46,
                 ventricular: 0.0,
-                glottis_noise_scale: 1.0,
+                glottis_noise_scale: 0.95,
                 f0_scale: 1.04,
                 rate_scale: 1.02,
                 vibrato_depth_cents: 18.0,
                 vibrato_rate_hz: 5.9,
-                drift_cents: 4.0,
+                drift_cents: 3.5,
             },
         }
     }
@@ -468,6 +474,8 @@ pub struct VocalBoxVoice {
     p_lung_now: f64,
     p_lung_step: f64,
     f0: f64,
+    prev_f0_target: f64,
+    steady_voiced_s: f64,
     score_f0: Option<f64>,
     base_abduction: f64,
     base_closure: f64,
@@ -477,7 +485,9 @@ pub struct VocalBoxVoice {
     dc_x: f64,
     dc_y: f64,
     dc_coef: f64,
+    lim_peak: f64,
     lim_env: f64,
+    lim_attack: f64,
     lim_hold: i64,
     lim_hold_n: i64,
     lim_release: f64,
@@ -521,7 +531,7 @@ impl VocalBoxVoice {
 
         let mut source = DEFAULT_SOURCE;
         source.f0 = anatomy.speaking_f0_hz;
-        source.roughness = 0.06;
+        source.roughness = 0.05;
 
         let sc = anatomy.vtl_scale;
         let body_gain = if sc >= 1.0 {
@@ -547,7 +557,7 @@ impl VocalBoxVoice {
             clock: 0.0,
             gate: 0.0,
             musical_pitch_lock: false,
-            output_gain: 5.5e-7 * body_gain,
+            output_gain: 4.65e-7 * body_gain,
             max_penetration: 0.1,
             emotion: EmotionPreset::Natural,
             dec: Decimator::new(m),
@@ -559,6 +569,8 @@ impl VocalBoxVoice {
             p_lung_now: 0.0,
             p_lung_step: 0.0,
             f0: anatomy.speaking_f0_hz,
+            prev_f0_target: anatomy.speaking_f0_hz,
+            steady_voiced_s: 0.0,
             score_f0: None,
             base_abduction: 0.0,
             base_closure: 0.0,
@@ -567,10 +579,12 @@ impl VocalBoxVoice {
             dc_x: 0.0,
             dc_y: 0.0,
             dc_coef: exp((-2.0 * PI * 25.0) / fs_clean),
+            lim_peak: 0.0,
             lim_env: 0.0,
+            lim_attack: 1.0 - exp(-1.0 / (0.0025 * fs_clean)),
             lim_hold: 0,
-            lim_hold_n: js_round(0.025 * fs_clean) as i64,
-            lim_release: exp(-1.0 / (0.20 * fs_clean)),
+            lim_hold_n: js_round(0.035 * fs_clean) as i64,
+            lim_release: exp(-1.0 / (0.18 * fs_clean)),
             rms_acc: vec![0.0; n_tract],
             rms_count: 0,
             flow_sm: vec![0.0; n_tract],
@@ -630,6 +644,14 @@ impl VocalBoxVoice {
         self.source.vibrato_rate = p.vibrato_rate_hz;
         self.source.drift = p.drift_cents;
         self.source.voiced = !p.whisper;
+        if self.clock == 0.0 {
+            let f0_scale_eff = if self.musical_pitch_lock {
+                1.0
+            } else {
+                p.f0_scale
+            };
+            self.prev_f0_target = self.source.f0 * f0_scale_eff;
+        }
         self.apply_emotion_posture(self.clock == 0.0);
         self.apply_source();
         self.ctrl_counter = 0;
@@ -658,11 +680,16 @@ impl VocalBoxVoice {
         values.apply(&mut self.source);
         if let Some(f0) = values.f0 {
             self.f0 = clamp(f0, 24.0, 2000.0);
+            if self.clock == 0.0 {
+                let f0_scale_eff = if self.musical_pitch_lock {
+                    1.0
+                } else {
+                    self.emotion.profile().f0_scale
+                };
+                self.prev_f0_target = self.source.f0 * f0_scale_eff;
+            }
         }
         self.apply_source();
-        if self.clock == 0.0 && self.valve.is_two_mass() {
-            self.valve.two_mass.sync_to_phase(0.0, self.f0);
-        }
         self.ctrl_counter = 0;
     }
 
@@ -709,10 +736,18 @@ impl VocalBoxVoice {
         self.p_lung_now = 0.0;
         self.p_lung_step = 0.0;
         self.f0 = self.source.f0;
+        let f0_scale_eff = if self.musical_pitch_lock {
+            1.0
+        } else {
+            self.emotion.profile().f0_scale
+        };
+        self.prev_f0_target = self.source.f0 * f0_scale_eff;
+        self.steady_voiced_s = 0.0;
         self.score_f0 = None;
         self.ctrl_counter = 0;
         self.dc_x = 0.0;
         self.dc_y = 0.0;
+        self.lim_peak = 0.0;
         self.lim_env = 0.0;
         self.lim_hold = 0;
         self.rms_acc.fill(0.0);
@@ -760,10 +795,13 @@ impl VocalBoxVoice {
         let reg = register_state(self.f0, self.anatomy.speaking_f0_hz, s.tension);
 
         let amp = 0.17 * kf * reg.excursion_scale * if s.voiced { 1.0 } else { 0.0 };
+        // In human whispering (Rubin et al. 2006), membranous folds adduct while a supercritical
+        // arytenoid whisper aperture (~0.17-0.25 cm^2) drives a turbulent glottal jet (Re >> Re_crit)
+        // that excites F1-F3 vowel resonances without periodic oscillation.
         let base_abd = if s.voiced {
             0.10 * s.breathiness * s.breathiness
         } else {
-            0.22 + 0.10 * s.breathiness
+            0.19 + 0.06 * s.breathiness
         } * kf;
         self.base_abduction = base_abd;
         self.base_closure = 0.0;
@@ -776,10 +814,10 @@ impl VocalBoxVoice {
             clamp((by_tension + 0.80 * bright) * reg.sharpness_scale, 0.0, 1.0);
         let skew = clamp(0.57 + 0.16 * s.tension + 0.18 * bright, 0.38, 0.86);
 
-        let jitter = 0.0018 + 0.020 * s.roughness;
-        let shimmer = 0.011 + 0.16 * s.roughness;
+        let jitter = 0.0016 + 0.018 * s.roughness;
+        let shimmer = 0.010 + 0.14 * s.roughness;
         let diplophonia = if s.roughness > 0.5 {
-            (s.roughness - 0.5) * 1.35
+            (s.roughness - 0.5) * 1.30
         } else {
             0.0
         };
@@ -787,10 +825,6 @@ impl VocalBoxVoice {
 
         let idle = self.clock == 0.0;
         let f0 = self.f0;
-        if idle {
-            self.valve.ribbon.f0_now = f0;
-            self.valve.two_mass.f0_now = f0;
-        }
         let (g1, g2) = self.valve.params_mut();
         for g in [g1, g2] {
             g.f0 = f0;
@@ -808,6 +842,9 @@ impl VocalBoxVoice {
             g.vibrato_rate = s.vibrato_rate;
             g.drift = s.drift;
             g.effort = effort;
+        }
+        if idle {
+            self.valve.sync_idle();
         }
     }
 
@@ -845,23 +882,31 @@ impl VocalBoxVoice {
                     self.dc_y = hp;
                     v = hp;
 
-                    // 25 ms held-peak envelope gain rider: turns loud sung notes down smoothly
-                    // across whole glottal periods instead of squaring off peaks into buzz!
+                    // Two-stage peak-hold (35 ms hold, 180 ms release) + 2.5 ms smoothed gain-rider:
+                    // - Normal speech sits below 0.76 at exact unity gain.
+                    // - Sustained loud singing (e.g. Operatic high notes) converges to a steady linear
+                    //   gain over 2.5 ms, preserving full waveform crest factor without saturation.
+                    // - Rising peaks never evaluate `v * thresh / |v| = thresh`, preventing flat-topping.
                     let av = v.abs();
-                    if av >= self.lim_env {
-                        self.lim_env = av;
+                    if av >= self.lim_peak {
+                        self.lim_peak = av;
                         self.lim_hold = self.lim_hold_n;
                     } else if self.lim_hold > 0 {
                         self.lim_hold -= 1;
                     } else {
-                        self.lim_env *= self.lim_release;
+                        self.lim_peak *= self.lim_release;
                     }
-                    if self.lim_env > 0.72 {
-                        v *= 0.72 / self.lim_env;
+                    if self.lim_peak > self.lim_env {
+                        self.lim_env += self.lim_attack * (self.lim_peak - self.lim_env);
+                    } else {
+                        self.lim_env = self.lim_peak;
+                    }
+                    if self.lim_env > 0.76 {
+                        v *= 0.76 / self.lim_env;
                     }
                     let al = v.abs();
-                    if al > 0.85 {
-                        v = js_sign(v) * (0.85 + 0.14 * tanh((al - 0.85) / 0.14));
+                    if al > 0.86 {
+                        v = js_sign(v) * (0.86 + 0.12 * tanh((al - 0.86) / 0.12));
                     }
                     let vf = if v.is_finite() { v as f32 } else { 0.0 };
                     *o = vf;
@@ -923,7 +968,11 @@ impl VocalBoxVoice {
             } else {
                 0.0
             };
-            let abd = self.base_abduction + ab.value * ab_act * kf;
+            let abd = if self.source.voiced {
+                self.base_abduction + ab.value * ab_act * kf
+            } else {
+                js_max(self.base_abduction, ab.value * ab_act * kf)
+            };
 
             let cl = b[ControlKey::CLOSURE.index()];
             let clos = js_max(
@@ -941,19 +990,6 @@ impl VocalBoxVoice {
                 breath_val = br.value;
             }
 
-            let vb = b[ControlKey::VIBRATO.index()];
-            let vib_d = if vb.weight > 0.0 {
-                let blended =
-                    (self.source.vibrato_depth * 0.05 + vb.value * vb.weight) / (0.05 + vb.weight);
-                if emo.vibrato_depth_cents > 0.0 {
-                    js_max(blended, 0.55 * emo.vibrato_depth_cents)
-                } else {
-                    blended
-                }
-            } else {
-                self.source.vibrato_depth
-            };
-
             let pf = b[ControlKey::F0.index()];
             if pf.weight > 0.0 {
                 let raw_f0 = (self.source.f0 * 0.02 + pf.value * pf.weight) / (0.02 + pf.weight);
@@ -962,6 +998,30 @@ impl VocalBoxVoice {
             } else {
                 self.score_f0 = None;
             }
+
+            // Sustained-pitch vibrato bloom (Sundberg 1987): suppresses synthetic LFO warble across
+            // rapid spoken syllables while blooming organically on held sung notes & long vowels.
+            let rel_df0 = (f0_target - self.prev_f0_target).abs() / js_max(f0_target, 50.0);
+            self.prev_f0_target = f0_target;
+            if self.valve.voicing() > 0.40 && rel_df0 < 1.8 * dt {
+                self.steady_voiced_s = js_min(1.0, self.steady_voiced_s + dt);
+            } else {
+                self.steady_voiced_s = js_max(0.0, self.steady_voiced_s - 3.0 * dt);
+            }
+            let vib_bloom = smoothstep(0.16, 0.42, self.steady_voiced_s);
+
+            let vb = b[ControlKey::VIBRATO.index()];
+            let vib_d = if vb.weight > 0.0 {
+                let blended = (self.source.vibrato_depth * vib_bloom * 0.05 + vb.value * vb.weight)
+                    / (0.05 + vb.weight);
+                if emo.vibrato_depth_cents > 0.0 {
+                    js_max(blended, 0.55 * emo.vibrato_depth_cents * vib_bloom)
+                } else {
+                    blended
+                }
+            } else {
+                self.source.vibrato_depth * vib_bloom
+            };
 
             let (g1, g2) = self.valve.params_mut();
             for g in [g1, g2] {
@@ -975,11 +1035,19 @@ impl VocalBoxVoice {
             }
         } else {
             self.artic.step(dt, None, 1.0);
+            let rel_df0 = (f0_target - self.prev_f0_target).abs() / js_max(f0_target, 50.0);
+            self.prev_f0_target = f0_target;
+            if self.valve.voicing() > 0.40 && rel_df0 < 1.8 * dt {
+                self.steady_voiced_s = js_min(1.0, self.steady_voiced_s + dt);
+            } else {
+                self.steady_voiced_s = js_max(0.0, self.steady_voiced_s - 3.0 * dt);
+            }
+            let vib_bloom = smoothstep(0.16, 0.42, self.steady_voiced_s);
             let (g1, g2) = self.valve.params_mut();
             for g in [g1, g2] {
                 g.abduction = self.base_abduction;
                 g.closure = self.base_closure;
-                g.vibrato_depth = self.source.vibrato_depth;
+                g.vibrato_depth = self.source.vibrato_depth * vib_bloom;
             }
             self.score_f0 = None;
         }
@@ -995,7 +1063,8 @@ impl VocalBoxVoice {
         self.airway.net.begin_block(self.ctrl_every);
         self.ctrl_counter = self.ctrl_every as i64;
 
-        // Respiratory breath envelope
+        // Respiratory breath envelope with prosodic intercostal stress coupling (Ladefoged 1967):
+        // stressed syllables naturally receive fuller subglottal support and brighter closure.
         let score_breath = breath_val * breath_act;
         let gate_goal = if score_breath < 0.0 {
             score_breath
@@ -1015,7 +1084,16 @@ impl VocalBoxVoice {
             0.070
         };
         self.gate += (gate_goal - self.gate) * (1.0 - exp(-dt / tau));
-        self.p_lung = self.source.pressure * CM_H2O * self.gate;
+
+        let f0_base = js_max(self.source.f0 * f0_scale_eff, 40.0);
+        let prosodic_p = if !self.musical_pitch_lock && self.score_f0.is_some() {
+            let oct = log2(clamp(f0_target / f0_base, 0.5, 2.0));
+            clamp(1.0 + 0.34 * oct, 0.90, 1.18)
+        } else {
+            1.0
+        };
+        let p_eff_cm_h2o = self.source.pressure * prosodic_p;
+        self.p_lung = p_eff_cm_h2o * CM_H2O * self.gate;
         self.p_lung_step = (self.p_lung - self.p_lung_now) / self.ctrl_every as f64;
 
         // Smooth pitch glide & continuous 5-octave CT/TA registration update
@@ -1025,7 +1103,7 @@ impl VocalBoxVoice {
         let s = self.source;
         let kf = self.anatomy.fold_area_scale;
         let reg = register_state(self.f0, self.anatomy.speaking_f0_hz, s.tension);
-        let effort = clamp(((s.pressure * self.gate).abs() - 3.0) / 10.0, 0.0, 1.0);
+        let effort = clamp(((p_eff_cm_h2o * self.gate).abs() - 3.0) / 10.0, 0.0, 1.0);
         let amp = 0.17 * kf * reg.excursion_scale * if s.voiced { 1.0 } else { 0.0 };
         let oq = clamp(0.76 - 0.34 * s.tension + reg.oq_shift, 0.28, 0.94);
         let bright = s.brightness - DEFAULT_SOURCE.brightness;

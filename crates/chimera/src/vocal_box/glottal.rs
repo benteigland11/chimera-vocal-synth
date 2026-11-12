@@ -136,6 +136,9 @@ pub struct RibbonGlottis {
     phase: f64,
     cycle_amp: f64,
     cycle_period_scale: f64,
+    cycle_oq: f64,
+    cycle_skew: f64,
+    cycle_sharp: f64,
     cycle_index: u64,
     jitter_lp: f64,
     shimmer_lp: f64,
@@ -145,9 +148,13 @@ pub struct RibbonGlottis {
     rng: Rng,
     drift: Drift,
     drift_value: f64,
+    drift_sm: f64,
     drift_counter: i32,
-    pitch_factor: f64,
 
+    f0_sm: f64,
+    oq_sm: f64,
+    skew_sm: f64,
+    sharp_sm: f64,
     voicing_sm: f64,
     dp_sm: f64,
     dp_coef: f64,
@@ -175,6 +182,9 @@ impl RibbonGlottis {
             phase: 0.0,
             cycle_amp: 1.0,
             cycle_period_scale: 1.0,
+            cycle_oq: DEFAULT_GLOTTIS.open_quotient,
+            cycle_skew: DEFAULT_GLOTTIS.skew,
+            cycle_sharp: DEFAULT_GLOTTIS.closure_sharpness,
             cycle_index: 0,
             jitter_lp: 0.0,
             shimmer_lp: 0.0,
@@ -183,8 +193,12 @@ impl RibbonGlottis {
             rng: Rng::new(777),
             drift: Drift::new(fs_clean / 32.0, 0.3, 4242),
             drift_value: 0.0,
+            drift_sm: 0.0,
             drift_counter: 0,
-            pitch_factor: 1.0,
+            f0_sm: DEFAULT_GLOTTIS.f0,
+            oq_sm: DEFAULT_GLOTTIS.open_quotient,
+            skew_sm: DEFAULT_GLOTTIS.skew,
+            sharp_sm: DEFAULT_GLOTTIS.closure_sharpness,
             voicing_sm: 0.0,
             dp_sm: 0.0,
             dp_coef: 1.0 - exp(-TAU * 32.0 / fs_clean),
@@ -192,7 +206,7 @@ impl RibbonGlottis {
             static_sm: 0.0,
             closure_sm: 0.0,
             amp_sm: 0.0,
-            sm_coef: 1.0 - exp(-1.0 / (0.0038 * fs_clean)),
+            sm_coef: 1.0 - exp(-1.0 / (0.0032 * fs_clean)),
         }
     }
 
@@ -202,6 +216,13 @@ impl RibbonGlottis {
         *self = Self::new(fs);
         self.params = params;
         self.f0_now = params.f0;
+        self.f0_sm = params.f0;
+        self.oq_sm = params.open_quotient;
+        self.skew_sm = params.skew;
+        self.sharp_sm = params.closure_sharpness;
+        self.cycle_oq = params.open_quotient;
+        self.cycle_skew = params.skew;
+        self.cycle_sharp = params.closure_sharpness;
     }
 
     #[inline]
@@ -215,29 +236,45 @@ impl RibbonGlottis {
         let dp_clean = if dp.is_finite() { dp } else { 0.0 };
         self.dp_sm += self.dp_coef * (dp_clean - self.dp_sm);
 
+        // Per-sample continuous vibrato & smoothed pitch drift (eliminates 32-sample FM staircases)
         self.drift_counter -= 1;
         if self.drift_counter <= 0 {
             self.drift_counter = 32;
             self.drift_value = self.drift.step();
-            self.vib_phase +=
-                ((p.vibrato_rate * 32.0) / self.fs) * (1.0 + 0.04 * self.drift_value);
-            if self.vib_phase >= 1.0 {
-                self.vib_phase -= 1.0;
-            }
-            let cents = p.vibrato_depth * sin(TAU * self.vib_phase) + p.drift * self.drift_value;
-            self.pitch_factor = pow(2.0, cents / 1200.0);
         }
+        let sc = self.sm_coef;
+        self.drift_sm += sc * (self.drift_value - self.drift_sm);
+        self.vib_phase += (p.vibrato_rate / self.fs) * (1.0 + 0.04 * self.drift_sm);
+        if self.vib_phase >= 1.0 {
+            self.vib_phase -= 1.0;
+        }
+        let cents = p.vibrato_depth * sin(TAU * self.vib_phase) + p.drift * self.drift_sm;
+        let pitch_factor = pow(2.0, cents / 1200.0);
 
-        let mut f0 = clamp(p.f0 * self.pitch_factor, 24.0, 1800.0);
-        if p.fry > 0.0 {
-            f0 = f0 * (1.0 - p.fry) + js_min(f0, 48.0) * p.fry;
+        // Melody-preserving vocal-fry register sag (keeps natural intonation contour intact)
+        let fry_amt = clamp(p.fry, 0.0, 1.0);
+        let mut f0_raw = clamp(p.f0 * pitch_factor, 24.0, 1800.0);
+        if fry_amt > 0.0 {
+            f0_raw = clamp(f0_raw * (1.0 - 0.18 * fry_amt), 24.0, 1800.0);
         }
+        self.f0_sm += sc * (f0_raw - self.f0_sm);
+        let f0 = self.f0_sm;
         self.f0_now = f0;
+
+        // Smooth pulse-shape targets continuously
+        let mut oq_target = clamp(p.open_quotient - 0.16 * (p.effort - 0.5), 0.26, 0.96);
+        if fry_amt > 0.0 {
+            oq_target = lerp(oq_target, 0.34, 0.72 * fry_amt);
+        }
+        self.oq_sm += sc * (oq_target - self.oq_sm);
+        self.skew_sm += sc * (clamp(p.skew, 0.34, 0.88) - self.skew_sm);
+        self.sharp_sm += sc * (clamp(p.closure_sharpness, 0.0, 1.0) - self.sharp_sm);
 
         // Aerodynamic & proportional adduction voicing gate (scales cleanly across male/female/child)
         let abd_ref = js_max(0.075, 0.85 * p.amplitude + 0.045);
         let pressure_gate = smoothstep(self.threshold * 0.75, self.threshold * 1.50, self.dp_sm);
-        let adduct_gate = 1.0 - smoothstep(0.45 * abd_ref, 1.25 * abd_ref, self.static_sm - p.chink);
+        let adduct_gate =
+            1.0 - smoothstep(0.45 * abd_ref, 1.25 * abd_ref, self.static_sm - p.chink);
         let target = pressure_gate
             * adduct_gate
             * (1.0 - self.closure_sm)
@@ -248,9 +285,19 @@ impl RibbonGlottis {
         }
         self.voicing = self.voicing_sm;
 
+        if self.voicing_sm == 0.0 || self.phase >= self.cycle_oq {
+            // Closed phase or unvoiced: safe to track smoothed pulse shape with zero waveform jump
+            self.cycle_oq = self.oq_sm;
+            self.cycle_skew = self.skew_sm;
+            self.cycle_sharp = self.sharp_sm;
+        }
+
         self.phase += (f0 / self.fs) / self.cycle_period_scale;
         if self.phase >= 1.0 {
             self.phase -= 1.0;
+            self.cycle_oq = self.oq_sm;
+            self.cycle_skew = self.skew_sm;
+            self.cycle_sharp = self.sharp_sm;
             self.cycle_index = self.cycle_index.wrapping_add(1);
             let alt = if self.cycle_index & 1 == 1 { 1.0 } else { -1.0 };
             let mut chaos_p = 0.0;
@@ -266,38 +313,38 @@ impl RibbonGlottis {
                 chaos_a = 1.05 * p.chaos * dev;
             }
             // Correlated 1/f-like neuromuscular tremor (avoids harsh white cycle-step noise)
-            self.jitter_lp = 0.62 * self.jitter_lp + 0.38 * self.rng.gauss();
-            self.shimmer_lp = 0.62 * self.shimmer_lp + 0.38 * self.rng.gauss();
+            self.jitter_lp = 0.72 * self.jitter_lp + 0.28 * self.rng.gauss();
+            self.shimmer_lp = 0.72 * self.shimmer_lp + 0.28 * self.rng.gauss();
 
+            // Dicrotic subharmonic alternation for organic human vocal fry (Keating et al. 2015)
+            let fry_sub = if fry_amt > 0.15 {
+                smoothstep(0.15, 0.85, fry_amt)
+            } else {
+                0.0
+            };
             self.cycle_period_scale = clamp(
-                1.0 + p.jitter * self.jitter_lp + p.diplophonia * 0.08 * alt + chaos_p,
-                0.55,
-                1.80,
+                1.0 + p.jitter * self.jitter_lp
+                    + (p.diplophonia * 0.08 + 0.13 * fry_sub) * alt
+                    + chaos_p,
+                0.60,
+                1.70,
             );
             self.cycle_amp = js_max(
-                0.14,
+                0.18,
                 1.0 + p.shimmer * self.shimmer_lp
-                    - p.diplophonia * 0.34 * (if alt > 0.0 { 1.0 } else { 0.0 })
+                    - (p.diplophonia * 0.32 + 0.38 * fry_sub) * (if alt > 0.0 { 1.0 } else { 0.0 })
                     + chaos_a,
             );
         }
 
-        let mut oq = clamp(p.open_quotient - 0.16 * (p.effort - 0.5), 0.26, 0.96);
-        if p.fry > 0.0 {
-            oq = oq * (1.0 - p.fry) + 0.28 * p.fry;
-        }
-        let mut pulse = ribbon_pulse_c1(self.phase, oq, p.skew, p.closure_sharpness);
-        if p.fry > 0.3 {
-            let ph2 = self.phase - 0.38;
-            if ph2 > 0.0 {
-                pulse += 0.55
-                    * smoothstep(0.3, 0.8, p.fry)
-                    * ribbon_pulse_c1(ph2, oq * 0.8, p.skew, p.closure_sharpness);
-            }
-        }
+        let pulse = ribbon_pulse_c1(
+            self.phase,
+            self.cycle_oq,
+            self.cycle_skew,
+            self.cycle_sharp,
+        );
 
         let effort_scale = 0.45 + 0.75 * p.effort;
-        let sc = self.sm_coef;
         self.amp_sm += sc * (p.amplitude * effort_scale - self.amp_sm);
         self.closure_sm += sc * (p.closure - self.closure_sm);
         self.static_sm += sc * (p.abduction + p.chink - self.static_sm);
@@ -357,6 +404,25 @@ impl GlottalValve {
         self.two_mass.params = params;
         if self.ribbon.voicing == 0.0 && self.ribbon.cycle_phase() == 0.0 {
             self.ribbon.f0_now = params.f0;
+        }
+    }
+
+    pub fn sync_idle(&mut self) {
+        let rp = self.ribbon.params;
+        self.ribbon.f0_now = rp.f0;
+        self.ribbon.f0_sm = rp.f0;
+        self.ribbon.oq_sm = rp.open_quotient;
+        self.ribbon.skew_sm = rp.skew;
+        self.ribbon.sharp_sm = rp.closure_sharpness;
+        self.ribbon.cycle_oq = rp.open_quotient;
+        self.ribbon.cycle_skew = rp.skew;
+        self.ribbon.cycle_sharp = rp.closure_sharpness;
+        let tp = self.two_mass.params;
+        self.two_mass.f0_now = tp.f0;
+        if self.use_two_mass {
+            self.two_mass.sync_to_phase(0.0, tp.f0);
+        } else {
+            self.two_mass.reset();
         }
     }
 
