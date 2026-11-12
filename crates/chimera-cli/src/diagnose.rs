@@ -127,7 +127,7 @@ pub fn run(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             v.schedule(&plan.gestures);
             for block in out.chunks_mut(128) {
                 v.render(block);
-                let tel = v.core.telemetry();
+                let tel = v.instant_telemetry();
                 port.push(tel.velum_port_cm2);
                 f0t.push(tel.f0_now_hz);
                 voic.push(tel.voicing);

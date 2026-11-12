@@ -58,6 +58,14 @@ impl Decimator {
         Decimator { factor, h, buf: vec![0.0; taps * 2], pos: 0, count: 0, value: 0.0 }
     }
 
+    /// Zero-allocation in-place delay-line reset.
+    pub fn reset(&mut self) {
+        self.buf.fill(0.0);
+        self.pos = 0;
+        self.count = 0;
+        self.value = 0.0;
+    }
+
     /// Push one input sample; returns true when an output sample is ready in `value`.
     #[inline]
     pub fn push(&mut self, x: f64) -> bool {

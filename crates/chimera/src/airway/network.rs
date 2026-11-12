@@ -1216,4 +1216,22 @@ impl AirwayNetwork {
         self.rad_l_prev.fill(0.0);
         self.rad_prev_total = 0.0;
     }
+
+    /// Deterministically reset all acoustic, volume-source, radiation, and noise-PRNG state in-place.
+    pub fn reset_deterministic(&mut self) {
+        self.reset();
+        self.branch_area.fill(0.0);
+        self.spill.fill(0.0);
+        self.vol_src1.fill(0.0);
+        self.vol_src2.fill(0.0);
+        self.rad_u.fill(0.0);
+        self.out = 0.0;
+        self.rng = Rng::new(12345);
+        for s in &mut self.noise {
+            s.hp = 0.0;
+            s.lp1 = 0.0;
+            s.lp2 = 0.0;
+            s.level = 0.0;
+        }
+    }
 }
