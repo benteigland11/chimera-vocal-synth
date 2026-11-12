@@ -703,9 +703,95 @@ fn modal_speech_glottal_closure_and_cross_body_intelligibility() {
         let mean_sib_rms = sib_rms_sum / sib_n as f64;
         assert!(
             mean_sib_rms > 0.14 * mean_vowel_rms,
-            "{label} sibilants choked relative to vowels: sib={mean_sib_rms:.4}, vowel={mean_vowel_rms:.4}"
+            "{label} sibilants choked relative to vowels: sib={mean_sib_rms:.4}, vowel={mean_sib_rms:.4}"
         );
     }
 }
 
+#[test]
+fn mucosal_wave_stability_single_impulse_closure_and_zero_scoop_vot_pitch() {
+    chimera::init();
 
+    // 1. Direct TwoMassGlottis physical invariants:
+    //    - Upper margin x2 follows lower mass x1 passively (x2_pk / x1_pk < 1.05; no 2.4x whip overdrive),
+    //    - Peak opening curvature is softer than glottal closure excitation (no mid-open tent-corner buzz).
+    let fs_g = 96_000.0;
+    let mut g = TwoMassGlottis::new(fs_g);
+    g.params.f0 = 180.0;
+    g.params.amplitude = 0.12;
+    g.params.effort = 0.55;
+    g.params.open_quotient = 0.59;
+    g.params.closure_sharpness = 0.35;
+
+    for _ in 0..(0.12 * fs_g) as usize {
+        g.step(8.2 * CM_H2O);
+    }
+    let mut x1_pk = 0.0f64;
+    let mut x2_pk = 0.0f64;
+    let mut areas = Vec::with_capacity((0.06 * fs_g) as usize);
+    for _ in 0..(0.06 * fs_g) as usize {
+        let a = g.step(8.2 * CM_H2O);
+        let (x1, x2) = g.displacements_cm();
+        x1_pk = x1_pk.max(x1.abs());
+        x2_pk = x2_pk.max(x2.abs());
+        areas.push(a);
+    }
+    let ratio = x2_pk / x1_pk.max(1e-9);
+    assert!(
+        (0.55..=1.05).contains(&ratio),
+        "expected damped passive mucosal wave ratio x2/x1 in 0.55..1.05, got {ratio:.3} (x1={x1_pk:.4}, x2={x2_pk:.4})"
+    );
+
+    let peak_area = areas.iter().copied().fold(0.0f64, f64::max);
+    let mut max_mid_open_curv = 0.0f64;
+    let mut max_closure_curv = 0.0f64;
+    for w in areas.windows(3) {
+        let d2 = (w[2] - 2.0 * w[1] + w[0]) * fs_g * fs_g;
+        if w[1] > 0.55 * peak_area {
+            max_mid_open_curv = max_mid_open_curv.max(d2.abs());
+        } else if w[1] < 0.30 * peak_area {
+            max_closure_curv = max_closure_curv.max(d2.abs());
+        }
+    }
+    assert!(
+        max_mid_open_curv < max_closure_curv,
+        "mid-open tent corner ({max_mid_open_curv:.0} cm^2/s^2) must be smoother than closure ({max_closure_curv:.0} cm^2/s^2)"
+    );
+
+    // 2. Connected consonant-vowel transitions ("ˈsɑpɑ ˈtɑkɑ") must lock onto vowel F0 without
+    //    a multi-semitone flat scoop ("wah-wah") on consonant release.
+    let plan = plan_utterance(
+        &tokenize_ipa("ˈsɑpɑ ˈtɑkɑ"),
+        &PlanOptions {
+            body: BodyMix::FEMALE,
+            t0: 0.05,
+            f0: Some(210.0),
+            ..Default::default()
+        },
+    );
+    let mut v = VocalBoxVoice::new(FS, BodyMix::FEMALE);
+    v.set_source(&SourcePatch::f0(210.0));
+    v.schedule(&plan.gestures);
+
+    let final_t0 = plan.segments.last().map_or(plan.end, |s| s.t0);
+    let total = ((plan.end + 0.20) * FS).round() as usize;
+    let mut buf = vec![0.0f32; total];
+    let mut min_nonfinal_f0 = f64::INFINITY;
+    let mut min_voiced_f0 = f64::INFINITY;
+    let mut max_voiced_f0 = 0.0f64;
+    for ch in buf.chunks_mut(16) {
+        v.render(ch);
+        let tel = v.instant_telemetry();
+        if tel.voicing > 0.70 {
+            min_voiced_f0 = min_voiced_f0.min(tel.f0_now_hz);
+            max_voiced_f0 = max_voiced_f0.max(tel.f0_now_hz);
+            if v.clock < final_t0 {
+                min_nonfinal_f0 = min_nonfinal_f0.min(tel.f0_now_hz);
+            }
+        }
+    }
+    assert!(
+        min_nonfinal_f0 > 185.0 && min_voiced_f0 > 165.0 && max_voiced_f0 < 252.0,
+        "unexpected post-consonant F0 scoop or overshoot: nonfinal_min={min_nonfinal_f0:.1} Hz, min={min_voiced_f0:.1} Hz, max={max_voiced_f0:.1} Hz"
+    );
+}
