@@ -238,9 +238,9 @@ impl TwoMassState {
             let exact_samples = self.period_acc - frac;
             let inst_f0 = fs / exact_samples.max(1.0);
             if inst_f0 > 0.65 * f0_target && inst_f0 < 1.55 * f0_target {
-                self.measured_f0 = lerp(self.measured_f0, inst_f0, 0.25);
-                let ratio = clamp(f0_target / self.measured_f0, 0.80, 1.25);
-                self.q_trim = clamp(self.q_trim * pow(ratio, 0.28), 0.72, 1.40);
+                self.measured_f0 = lerp(self.measured_f0, inst_f0, 0.45);
+                let ratio = clamp(f0_target / inst_f0, 0.85, 1.18);
+                self.q_trim = clamp(self.q_trim * pow(ratio, 0.22), 0.80, 1.25);
             }
             self.period_acc = frac;
         }

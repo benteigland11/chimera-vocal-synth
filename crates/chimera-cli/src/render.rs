@@ -3,8 +3,8 @@
 use crate::js::{fixed, num, pad_end, pad_start};
 use crate::{Ctx, FS, arg, body, body_mix, peak, repo_path, wav_name};
 use chimera::analysis::lpc::{FormantOpts, estimate_formants};
-use chimera::anatomy::human::{ArticKey, BodyMix, N_ARTIC};
 use chimera::analysis::pitch::{YinOpts, yin_pitch};
+use chimera::anatomy::human::{ArticKey, ArticPatch, BodyMix, HumanArtic, HumanBody, N_ARTIC};
 use chimera::control::beat_player::BeatPlayer;
 use chimera::control::score::Gesture;
 use chimera::creatures::types::ParamRole;
@@ -24,12 +24,120 @@ use chimera::phonetics::sing::{
 use chimera::phonetics::songs::DEMO_SONGS;
 use chimera::phonetics::syllables::lyrics_to_syllables;
 use chimera::phonetics::{Intonation, Plan, Syllable};
+use chimera::vocal_box::VocalBoxVoice;
 use chimera::voice::human_voice::{HumanVoice, SCOPE_POINTS, SourcePatch, VoiceTelemetry};
 use std::io::Read;
 use std::time::Instant;
 
+enum RenderVoice {
+    Human(Box<HumanVoice>),
+    VocalBox(Box<VocalBoxVoice>),
+}
+
+impl RenderVoice {
+    fn new(ctx: &Ctx, body_name: &str, b: HumanBody, musical: bool) -> Result<Self, String> {
+        if ctx.use_vocal_box() {
+            let mut v = VocalBoxVoice::new(FS, body_mix(body_name)?);
+            v.musical_pitch_lock = musical;
+            v.set_two_mass(ctx.two_mass);
+            if let Some(em) = ctx.emotion {
+                v.set_emotion(em);
+            }
+            Ok(Self::VocalBox(Box::new(v)))
+        } else {
+            Ok(Self::Human(Box::new(HumanVoice::new(FS, b, 2))))
+        }
+    }
+
+    fn set_source_with_emotion(&mut self, ctx: &Ctx, patch: &SourcePatch, base_f0: f64, musical: bool) {
+        match self {
+            Self::Human(v) => {
+                v.set_source(patch);
+                if let Some(em) = ctx.emotion {
+                    let mut ep = em.profile().to_source_patch(base_f0);
+                    if musical {
+                        ep.f0 = patch.f0;
+                    }
+                    v.set_source(&ep);
+                }
+            }
+            Self::VocalBox(v) => {
+                v.set_source(patch);
+                if let Some(em) = ctx.emotion {
+                    v.set_emotion(em);
+                    if let Some(f0) = patch.f0 {
+                        v.set_source(&SourcePatch::f0(f0));
+                    }
+                }
+            }
+        }
+    }
+
+    fn set_articulation(&mut self, values: &ArticPatch, tip_free: Option<bool>) {
+        match self {
+            Self::Human(v) => v.set_articulation(values, tip_free),
+            Self::VocalBox(v) => v.set_articulation(values, tip_free),
+        }
+    }
+
+    fn schedule(&mut self, gestures: &[Gesture]) {
+        match self {
+            Self::Human(v) => v.schedule(gestures),
+            Self::VocalBox(v) => v.schedule(gestures),
+        }
+    }
+
+    fn release(&mut self, tag: f64) {
+        match self {
+            Self::Human(v) => v.release(tag),
+            Self::VocalBox(v) => v.release(tag),
+        }
+    }
+
+    fn set_gate(&mut self, level: f64) {
+        match self {
+            Self::Human(v) => v.set_gate(level),
+            Self::VocalBox(v) => v.set_gate(level),
+        }
+    }
+
+    fn clock(&self) -> f64 {
+        match self {
+            Self::Human(v) => v.clock,
+            Self::VocalBox(v) => v.clock,
+        }
+    }
+
+    fn artic_x(&self) -> &HumanArtic {
+        match self {
+            Self::Human(v) => &v.artic.x,
+            Self::VocalBox(v) => &v.artic.x,
+        }
+    }
+
+    fn render(&mut self, out: &mut [f32]) {
+        match self {
+            Self::Human(v) => v.render(out),
+            Self::VocalBox(v) => v.render(out),
+        }
+    }
+
+    fn telemetry(&mut self, out: &mut VoiceTelemetry) {
+        match self {
+            Self::Human(v) => v.telemetry(out),
+            Self::VocalBox(v) => v.telemetry(out),
+        }
+    }
+}
+
 /// Render `out.len()` samples in 128-sample blocks, as the tools did.
 fn render_blocks(v: &mut HumanVoice, out: &mut [f32]) {
+    for block in out.chunks_mut(128) {
+        v.render(block);
+    }
+}
+
+fn render_voice_blocks(v: &mut RenderVoice, out: &mut [f32]) {
     for block in out.chunks_mut(128) {
         v.render(block);
     }
@@ -88,8 +196,9 @@ pub fn speech(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         "child" => 250.0,
         _ => 110.0,
     };
-    let mut voice = HumanVoice::new(FS, b, 2);
-    voice.set_source(&SourcePatch::f0(f0));
+    let mut voice = RenderVoice::new(ctx, body_name, b, false)?;
+    voice.set_source_with_emotion(ctx, &SourcePatch::f0(f0), f0, false);
+    let rate = ctx.emotion.map(|em| em.profile().rate_scale);
     let mut marks: Vec<(f64, String)> = Vec::new();
     let mut t0 = 0.05;
     for u in text.split('/').map(str::trim).filter(|u| !u.is_empty()) {
@@ -100,6 +209,7 @@ pub fn speech(ctx: &Ctx, a: &[String]) -> Result<(), String> {
                 body: body_name.into(),
                 t0,
                 f0: Some(f0),
+                rate,
                 ..Default::default()
             },
         );
@@ -111,7 +221,7 @@ pub fn speech(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     }
     let total = js_round(FS * (t0 + 0.2)) as usize;
     let mut out = vec![0f32; total];
-    render_blocks(&mut voice, &mut out);
+    render_voice_blocks(&mut voice, &mut out);
     let file = wav_name(name);
     ctx.write_wav(&file, &out)?;
     println!(
@@ -143,6 +253,10 @@ pub fn text_f0(body_name: &str) -> f64 {
 /// Say `text` the way `render text` does: CMUdict G2P, the phrase planner from t0 = 50 ms, the
 /// body's speaking f0, 300 ms of tail. `chimera compare tsp` measures exactly these renders.
 pub fn say(g: &EnglishG2P, text: &str, body_name: &str) -> Result<Spoken, String> {
+    say_with_ctx(&Ctx::default(), g, text, body_name)
+}
+
+fn say_with_ctx(ctx: &Ctx, g: &EnglishG2P, text: &str, body_name: &str) -> Result<Spoken, String> {
     let b = body(body_name)?;
     let f0 = text_f0(body_name);
     let phrases = g.to_phrases(text);
@@ -161,8 +275,6 @@ pub fn say(g: &EnglishG2P, text: &str, body_name: &str) -> Result<Spoken, String
             }
         })
         .collect();
-    let mut voice = HumanVoice::new(FS, b, 2);
-    voice.set_source(&SourcePatch::f0(f0));
     let inputs: Vec<PhraseInput> = phrases
         .iter()
         .map(|p| PhraseInput {
@@ -171,20 +283,52 @@ pub fn say(g: &EnglishG2P, text: &str, body_name: &str) -> Result<Spoken, String
             pause: Some(p.pause),
         })
         .collect();
+
+    if !ctx.is_custom_voice() {
+        let mut voice = HumanVoice::new(FS, b, 2);
+        voice.set_source(&SourcePatch::f0(f0));
+        let plan = plan_phrases(
+            &inputs,
+            &PlanOptions {
+                body: body_name.into(),
+                t0: 0.05,
+                f0: Some(f0),
+                ..Default::default()
+            },
+        );
+        voice.schedule(&plan.gestures);
+        let total = js_round(FS * (plan.end + 0.3)) as usize;
+        let mut out = vec![0f32; total];
+        render_blocks(&mut voice, &mut out);
+        return Ok(Spoken {
+            out,
+            plan,
+            shown: shown.join(" | "),
+        });
+    }
+
+    let mut voice = RenderVoice::new(ctx, body_name, b, false)?;
+    voice.set_source_with_emotion(ctx, &SourcePatch::f0(f0), f0, false);
+    let rate = ctx.emotion.map(|em| em.profile().rate_scale);
     let plan = plan_phrases(
         &inputs,
         &PlanOptions {
             body: body_name.into(),
             t0: 0.05,
             f0: Some(f0),
+            rate,
             ..Default::default()
         },
     );
     voice.schedule(&plan.gestures);
     let total = js_round(FS * (plan.end + 0.3)) as usize;
     let mut out = vec![0f32; total];
-    render_blocks(&mut voice, &mut out);
-    Ok(Spoken { out, plan, shown: shown.join(" | ") })
+    render_voice_blocks(&mut voice, &mut out);
+    Ok(Spoken {
+        out,
+        plan,
+        shown: shown.join(" | "),
+    })
 }
 
 /// English text through G2P and the phrase planner. `render text <out> ["Text."] [body]`
@@ -194,7 +338,7 @@ pub fn text(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let body_name = arg(a, 2, "male");
     let g = g2p()?;
     let t = Instant::now();
-    let s = say(&g, text, body_name)?;
+    let s = say_with_ctx(ctx, &g, text, body_name)?;
     let ms = ms_since(t);
     println!("{}", s.shown);
     let file = wav_name(name);
@@ -238,27 +382,40 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
                 syl: syl[i % syl.len()].clone(),
             })
             .collect();
-        let mut v = HumanVoice::new(FS, b, 2);
-        v.set_source(&SourcePatch {
-            f0: Some(midi_to_hz(notes[0].midi)),
-            voiced: Some(true),
-            pressure: Some(9.0),
-            tension: Some(0.55),
-            ..Default::default()
-        });
+        let mut v = RenderVoice::new(ctx, body_name, b, true)?;
+        let f0_init = midi_to_hz(notes[0].midi);
+        v.set_source_with_emotion(
+            ctx,
+            &SourcePatch {
+                f0: Some(f0_init),
+                voiced: Some(true),
+                pressure: Some(9.0),
+                tension: Some(0.55),
+                ..Default::default()
+            },
+            f0_init,
+            true,
+        );
+        let vibrato = ctx
+            .emotion
+            .map(|em| {
+                let vd = em.profile().vibrato_depth_cents;
+                if vd > 0.0 { vd } else { 35.0 }
+            })
+            .unwrap_or(35.0);
         let plan = plan_song(
             &notes,
             &SongOptions {
                 body: body_name.into(),
                 bpm: song.bpm,
                 t0: 0.3,
-                vibrato: 35.0,
+                vibrato,
             },
         );
         v.schedule(&plan.gestures);
         let n = js_round(FS * (plan.end + 0.4)) as usize;
         let mut out = vec![0f32; n];
-        render_blocks(&mut v, &mut out);
+        render_voice_blocks(&mut v, &mut out);
         ctx.write_wav(
             &format!("{out_dir}/{}-{body_name}.wav", slug(song.name)),
             &out,
@@ -274,13 +431,18 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
 
     // live-style: key presses with gaps and one legato pair, as the keyboard would send them
     let syl = lyrics_to_syllables("hello there my friend", &g);
-    let mut v = HumanVoice::new(FS, b, 2);
-    v.set_source(&SourcePatch {
-        f0: Some(130.0),
-        voiced: Some(true),
-        pressure: Some(9.0),
-        ..Default::default()
-    });
+    let mut v = RenderVoice::new(ctx, body_name, b, true)?;
+    v.set_source_with_emotion(
+        ctx,
+        &SourcePatch {
+            f0: Some(130.0),
+            voiced: Some(true),
+            pressure: Some(9.0),
+            ..Default::default()
+        },
+        130.0,
+        true,
+    );
     let keys: [(f64, f64, f64); 4] = [
         (0.2, 0.55, 57.0),
         (0.6, 1.0, 59.0),
@@ -296,7 +458,6 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         tag: f64,
     }
     let mut held: Option<Held> = None;
-    // (t, on, midi, key index), sorted by time (stable, as Array.sort)
     let mut events: Vec<(f64, bool, f64, usize)> = keys
         .iter()
         .enumerate()
@@ -305,7 +466,7 @@ pub fn song(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     events.sort_by(|x, y| x.0.total_cmp(&y.0));
     let mut e = 0;
     for block in out.chunks_mut(128) {
-        let now = v.clock;
+        let now = v.clock();
         while e < events.len() && events[e].0 <= now {
             let (_, on, m, i) = events[e];
             e += 1;
@@ -370,16 +531,6 @@ pub const TELE_SCOPE: usize = 32;
 /// `--tele` file version (see `TeleRecorder`).
 pub const TELE_VERSION: u32 = 1;
 
-/// The voice's telemetry over time, for replaying a render in the app (two heads singing a duet).
-///
-/// File layout, little-endian: `b"CHTL"`, then u32 version, sampleRate, hop, frames, frameLen,
-/// nArtic, nPh, nOr, nScope, then f32 bodyFemale, bodyChild (48 bytes in all); then `frames`
-/// frames of `frameLen` f32s. A frame is the wasm telemetry block's fields in its order
-/// (crates/chimera-wasm `engine_telemetry`): phLen, orLen, velumPort, f0, voicing, pLung, outRms,
-/// noiseLevel, noiseNode, gate, clock, then artic, phAreas, orAreas, pressureRms (nPh+nOr),
-/// flow (nPh+nOr), glottalArea (nScope), glottalFlow (nScope); no gesture labels.
-/// Frame i is the state at sample i·hop (frame 0 before any sound); its RMS levels cover the hop
-/// before it. A last partial hop gets no frame.
 struct TeleRecorder {
     t: VoiceTelemetry,
     data: Vec<f32>,
@@ -389,8 +540,14 @@ struct TeleRecorder {
 }
 
 impl TeleRecorder {
-    fn new(v: &mut HumanVoice) -> Self {
-        let mut r = TeleRecorder { t: VoiceTelemetry::default(), data: Vec::new(), frames: 0, n_ph: 0, n_or: 0 };
+    fn new(v: &mut RenderVoice) -> Self {
+        let mut r = TeleRecorder {
+            t: VoiceTelemetry::default(),
+            data: Vec::new(),
+            frames: 0,
+            n_ph: 0,
+            n_or: 0,
+        };
         v.telemetry(&mut r.t);
         r.n_ph = r.t.ph_areas.len();
         r.n_or = r.t.or_areas.len();
@@ -402,7 +559,7 @@ impl TeleRecorder {
         11 + N_ARTIC + 3 * (self.n_ph + self.n_or) + 2 * TELE_SCOPE
     }
 
-    fn snap(&mut self, v: &mut HumanVoice) -> Result<(), String> {
+    fn snap(&mut self, v: &mut RenderVoice) -> Result<(), String> {
         v.telemetry(&mut self.t);
         if self.t.ph_areas.len() != self.n_ph || self.t.or_areas.len() != self.n_or {
             return Err("the airway's section count changed during the render".into());
@@ -414,7 +571,22 @@ impl TeleRecorder {
     fn push_current(&mut self) {
         let t = &self.t;
         let d = &mut self.data;
-        d.extend([t.ph_len, t.or_len, t.velum_port, t.f0, t.voicing, t.p_lung, t.out_rms, t.noise_level, t.noise_node as f64, t.gate, t.clock].map(|x| x as f32));
+        d.extend(
+            [
+                t.ph_len,
+                t.or_len,
+                t.velum_port,
+                t.f0,
+                t.voicing,
+                t.p_lung,
+                t.out_rms,
+                t.noise_level,
+                t.noise_node as f64,
+                t.gate,
+                t.clock,
+            ]
+            .map(|x| x as f32),
+        );
         for arr in [&t.artic, &t.ph_areas, &t.or_areas, &t.pressure_rms, &t.flow] {
             d.extend_from_slice(arr);
         }
@@ -429,7 +601,17 @@ impl TeleRecorder {
     fn bytes(&self, body: BodyMix) -> Vec<u8> {
         let mut b = Vec::with_capacity(48 + 4 * self.data.len());
         b.extend_from_slice(b"CHTL");
-        for x in [TELE_VERSION, FS as u32, TELE_HOP as u32, self.frames, self.frame_len() as u32, N_ARTIC as u32, self.n_ph as u32, self.n_or as u32, TELE_SCOPE as u32] {
+        for x in [
+            TELE_VERSION,
+            FS as u32,
+            TELE_HOP as u32,
+            self.frames,
+            self.frame_len() as u32,
+            N_ARTIC as u32,
+            self.n_ph as u32,
+            self.n_or as u32,
+            TELE_SCOPE as u32,
+        ] {
             b.extend_from_slice(&x.to_le_bytes());
         }
         for x in [body.female as f32, body.child as f32] {
@@ -442,16 +624,26 @@ impl TeleRecorder {
     }
 }
 
-/// Render like `render_blocks`, recording the articulators every `ARTIC_RATE`th of a second
-/// (`artic`: frame i is the state at i / ARTIC_RATE s, plus one at the end) and/or the telemetry
-/// every `TELE_HOP` samples (`tele`). The two cadences are independent; taking telemetry is the
-/// only thing that resets its RMS levels. The voice runs sample by sample, so the sound is the
-/// same either way.
-fn render_tracked(v: &mut HumanVoice, out: &mut [f32], artic: bool, tele: bool) -> Result<(Vec<Vec<f64>>, Option<TeleRecorder>), String> {
+fn render_tracked(
+    v: &mut RenderVoice,
+    out: &mut [f32],
+    artic: bool,
+    tele: bool,
+) -> Result<(Vec<Vec<f64>>, Option<TeleRecorder>), String> {
     let a_hop = FS as usize / ARTIC_RATE;
-    let frame = |v: &HumanVoice| ArticKey::ALL.iter().map(|k| js_round(v.artic.x.get(*k) * 1e4) / 1e4).collect();
+    let frame = |v: &RenderVoice| {
+        let ax = v.artic_x();
+        ArticKey::ALL
+            .iter()
+            .map(|k| js_round(ax.get(*k) * 1e4) / 1e4)
+            .collect()
+    };
     let mut frames = if artic { vec![frame(v)] } else { Vec::new() };
-    let mut rec = if tele { Some(TeleRecorder::new(v)) } else { None };
+    let mut rec = if tele {
+        Some(TeleRecorder::new(v))
+    } else {
+        None
+    };
     let n = out.len();
     let (mut pos, mut next_a, mut next_t) = (0usize, a_hop, TELE_HOP);
     while pos < n {
@@ -462,7 +654,7 @@ fn render_tracked(v: &mut HumanVoice, out: &mut [f32], artic: bool, tele: bool) 
         if tele {
             end = end.min(next_t);
         }
-        render_blocks(v, &mut out[pos..end]);
+        render_voice_blocks(v, &mut out[pos..end]);
         pos = end;
         if artic && (pos == next_a || pos == n) {
             frames.push(frame(v));
@@ -479,14 +671,6 @@ fn render_tracked(v: &mut HumanVoice, out: &mut [f32], artic: bool, tele: bool) 
 }
 
 /// A melody from a JSON file: `{"bpm", "lyrics", "notes": [[midi, beats], ...], "vibrato"?}`.
-/// One lyric syllable per sounding note; a note with midi <= 0 is a rest, which splits the
-/// melody into phrases planned separately on one voice.
-/// `render notes <in.json> <out> [body] [--artic tracks.json] [--tele voice.tele]`: `--artic` also
-/// writes the articulators over time (`{"rate", "body", "keys", "frames"}`), to animate a face in
-/// sync; `--tele` writes the voice's whole telemetry over time (see `TeleRecorder`), which the
-/// app's duet page replays on a 3D head. The melody file may give `"syllables"` (IPA
-/// onset/nucleus/coda per sounding note) instead of English `"lyrics"`: a language front end's
-/// output (docs/language-front-ends.md).
 pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let mut artic_out: Option<String> = None;
     let mut tele_out: Option<String> = None;
@@ -502,17 +686,25 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         }
     }
     let a = &rest[..];
-    let input = a.first().ok_or("render notes <in.json> <out> [male|female|child] [--artic tracks.json] [--tele voice.tele]")?;
+    let input = a
+        .first()
+        .ok_or("render notes <in.json> <out> [male|female|child] [--artic tracks.json] [--tele voice.tele]")?;
     let out_name = wav_name(arg(a, 1, "out/notes"));
     let body_name = arg(a, 2, "male");
     let b = body(body_name)?;
     let text = std::fs::read_to_string(input).map_err(|e| format!("{input}: {e}"))?;
     let j: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{input}: {e}"))?;
     let bpm = j["bpm"].as_f64().ok_or("bpm missing")?;
-    let vibrato = j["vibrato"].as_f64().unwrap_or(35.0);
-    let raw: Vec<[f64; 2]> = serde_json::from_value(j["notes"].clone()).map_err(|e| format!("notes: {e}"))?;
-    // "syllables" sing what a language front end wrote; otherwise the lyrics go through the
-    // English front end (the pronouncing dictionary)
+    let vibrato = j["vibrato"].as_f64().unwrap_or_else(|| {
+        ctx.emotion
+            .map(|em| {
+                let vd = em.profile().vibrato_depth_cents;
+                if vd > 0.0 { vd } else { 35.0 }
+            })
+            .unwrap_or(35.0)
+    });
+    let raw: Vec<[f64; 2]> =
+        serde_json::from_value(j["notes"].clone()).map_err(|e| format!("notes: {e}"))?;
     let syl: Vec<Syllable> = if j.get("syllables").is_some() {
         serde_json::from_value(j["syllables"].clone()).map_err(|e| format!("syllables: {e}"))?
     } else {
@@ -521,28 +713,48 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     };
     let sounding = raw.iter().filter(|n| n[0] > 0.0).count();
     if syl.len() != sounding {
-        return Err(format!("{} syllables for {sounding} notes: {}", syl.len(),
-            syl.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ")));
+        return Err(format!(
+            "{} syllables for {sounding} notes: {}",
+            syl.len(),
+            syl.iter()
+                .map(|s| s.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        ));
     }
     let t0 = j["t0"].as_f64().unwrap_or(0.3);
     let beat = 60.0 / bpm;
-    let mut v = HumanVoice::new(FS, b, 2);
+    let mut v = RenderVoice::new(ctx, body_name, b, true)?;
     let first = raw.iter().find(|n| n[0] > 0.0).ok_or("no notes")?;
-    v.set_source(&SourcePatch {
-        f0: Some(midi_to_hz(first[0])),
-        voiced: Some(true),
-        pressure: Some(9.0),
-        tension: Some(0.55),
-        ..Default::default()
-    });
+    let f0_init = midi_to_hz(first[0]);
+    v.set_source_with_emotion(
+        ctx,
+        &SourcePatch {
+            f0: Some(f0_init),
+            voiced: Some(true),
+            pressure: Some(9.0),
+            tension: Some(0.55),
+            ..Default::default()
+        },
+        f0_init,
+        true,
+    );
     let (mut t, mut k, mut end) = (t0, 0usize, 0.0f64);
     let mut phrase: Vec<SungNote> = Vec::new();
     let mut start = t;
-    let flush = |phrase: &mut Vec<SungNote>, start: f64, v: &mut HumanVoice, end: &mut f64| {
+    let flush = |phrase: &mut Vec<SungNote>, start: f64, v: &mut RenderVoice, end: &mut f64| {
         if phrase.is_empty() {
             return;
         }
-        let plan = plan_song(phrase, &SongOptions { body: body_name.into(), bpm, t0: start, vibrato });
+        let plan = plan_song(
+            phrase,
+            &SongOptions {
+                body: body_name.into(),
+                bpm,
+                t0: start,
+                vibrato,
+            },
+        );
         v.schedule(&plan.gestures);
         *end = js_max(*end, plan.end);
         phrase.clear();
@@ -552,7 +764,11 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             if phrase.is_empty() {
                 start = t;
             }
-            phrase.push(SungNote { midi: n[0], beats: n[1], syl: syl[k].clone() });
+            phrase.push(SungNote {
+                midi: n[0],
+                beats: n[1],
+                syl: syl[k].clone(),
+            });
             k += 1;
         } else {
             flush(&mut phrase, start, &mut v, &mut end);
@@ -565,11 +781,16 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let (frames, rec) = if artic_out.is_some() || tele_out.is_some() {
         render_tracked(&mut v, &mut out, artic_out.is_some(), tele_out.is_some())?
     } else {
-        render_blocks(&mut v, &mut out);
+        render_voice_blocks(&mut v, &mut out);
         (Vec::new(), None)
     };
     ctx.write_wav(&out_name, &out)?;
-    println!("{out_name}: {} s, peak {}, {} notes", fixed(n as f64 / FS, 2), fixed(peak(&out), 3), sounding);
+    println!(
+        "{out_name}: {} s, peak {}, {} notes",
+        fixed(n as f64 / FS, 2),
+        fixed(peak(&out), 3),
+        sounding
+    );
     if let Some(path) = &artic_out {
         let j = serde_json::json!({"rate": ARTIC_RATE, "body": body_name, "keys": ArticKey::NAMES, "frames": frames});
         std::fs::write(path, j.to_string()).map_err(|e| format!("{path}: {e}"))?;
@@ -577,7 +798,10 @@ pub fn notes(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     }
     if let (Some(path), Some(r)) = (&tele_out, rec) {
         std::fs::write(path, r.bytes(body_mix(body_name)?)).map_err(|e| format!("{path}: {e}"))?;
-        println!("{path}: {} telemetry frames every {TELE_HOP} samples", r.frames);
+        println!(
+            "{path}: {} telemetry frames every {TELE_HOP} samples",
+            r.frames
+        );
     }
     Ok(())
 }
@@ -618,8 +842,6 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         let mut out = vec![0f32; n];
         render_blocks(&mut v, &mut out);
         let abs = |i: usize| (out[i] as f64).abs();
-        // the event: its peak within [hit − 30 ms, hit + 80 ms]; onset = first sample from
-        // hit − 40 ms that reaches a quarter of that peak
         let mut pk = 0.0;
         for i in at(hit - 0.03)..at(hit + 0.08) {
             pk = js_max(pk, abs(i));
@@ -631,12 +853,10 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
                 break;
             }
         }
-        // energy before the hit (set-up noise) relative to the hit
         let mut pre = 0.0;
         for i in at(hit - 0.15)..at(hit - 0.04) {
             pre = js_max(pre, abs(i));
         }
-        // what follows: level 60–150 ms after the hit (unwanted voicing shows up here)
         let mut tail = 0.0;
         for i in at(hit + 0.06)..at(hit + 0.15) {
             tail = js_max(tail, abs(i));
@@ -652,24 +872,30 @@ pub fn beatbox(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             fixed(BeatPlayer::lead_in(s.id, body_name.into()) * 1000.0, 0),
         ));
         strip[idx * n..(idx + 1) * n].copy_from_slice(&out);
-        let file: String =
-            s.id.chars()
-                .map(|c| if c.is_ascii_alphabetic() { c } else { '_' })
-                .collect();
+        let file: String = s
+            .id
+            .chars()
+            .map(|c| if c.is_ascii_alphabetic() { c } else { '_' })
+            .collect();
         ctx.write_wav(&format!("{out_dir}/{file}.wav"), &out)?;
     }
     println!("{}", rows.join("\n"));
     ctx.write_wav(&format!("{out_dir}/kit.wav"), &strip)?;
 
-    // ---- a pattern, two bars, through the sequencer exactly as the worklet ran it
-    // a preset by name, or a pattern in beat notation (with optional bpm and bar count)
     let preset = BEAT_PRESETS
         .iter()
         .find(|p| p.name.to_lowercase() == preset_name.to_lowercase());
     let (name, text, mut bpm, swing) = match preset {
         Some(p) => (p.name, p.text, p.bpm, p.swing),
-        None if parse_beat(preset_name).iter().any(Option::is_some) => ("pattern", preset_name, 100.0, 0.0),
-        None => (BEAT_PRESETS[0].name, BEAT_PRESETS[0].text, BEAT_PRESETS[0].bpm, BEAT_PRESETS[0].swing),
+        None if parse_beat(preset_name).iter().any(Option::is_some) => {
+            ("pattern", preset_name, 100.0, 0.0)
+        }
+        None => (
+            BEAT_PRESETS[0].name,
+            BEAT_PRESETS[0].text,
+            BEAT_PRESETS[0].bpm,
+            BEAT_PRESETS[0].swing,
+        ),
     };
     if let Some(b) = a.get(3) {
         bpm = b.parse().map_err(|_| format!("bad bpm {b:?}"))?;
@@ -732,11 +958,10 @@ pub fn creature(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             }
             start..start + n
         };
-    // sustained note at the default pitch
     let pitch_param = def.params.iter().find(|p| p.role == Some(ParamRole::Pitch));
     let voices = def.param_index("voices");
     if let Some(k) = voices {
-        v.set_params(&[(k, 0.0)]); // single voice for the pitch check
+        v.set_params(&[(k, 0.0)]);
     }
     v.set_gate(1.0);
     let sus = render_for(&mut v, &mut out, 1.2);
@@ -800,8 +1025,8 @@ pub fn vowels(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         "child" => 260.0,
         _ => 110.0,
     };
-    let mut voice = HumanVoice::new(FS, b, 2);
-    voice.set_source(&SourcePatch::f0(f0));
+    let mut voice = RenderVoice::new(ctx, body_name, b, false)?;
+    voice.set_source_with_emotion(ctx, &SourcePatch::f0(f0), f0, false);
     let list = ["i", "e", "ɛ", "æ", "ɑ", "ɔ", "o", "u", "ʌ", "ɝ"];
     let seg = 0.6;
     let mut out = vec![0f32; js_round(FS * seg * list.len() as f64) as usize];

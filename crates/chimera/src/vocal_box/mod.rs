@@ -15,6 +15,7 @@ pub mod interp;
 pub mod nasal;
 pub mod resampler;
 pub mod tract;
+pub mod voice;
 pub mod vowels;
 
 pub use glottal::{GlottalEngine, GlottalStep};
@@ -22,6 +23,7 @@ pub use interp::FrameInterpolator;
 pub use nasal::{NasalBranch, NasalOutput};
 pub use resampler::{Cheby2Decimator, oversample_factor_for};
 pub use tract::ResonantTract;
+pub use voice::{EmotionPreset, EmotionProfile, VocalBoxVoice};
 pub use vowels::{
     BodyPreset, ConstrictionPlace, VocalFrame, VocalParams, body_vtl_scale,
     closure_sharpness_from_frame, lerp_frame, soft_max_c1, vowel_frame, vowel_targets,

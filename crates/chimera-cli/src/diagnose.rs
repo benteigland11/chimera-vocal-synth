@@ -17,8 +17,10 @@ use crate::{Ctx, FS};
 use chimera::analysis::fft::{Fft, hann};
 use chimera::analysis::lpc::{FormantOpts, estimate_formants};
 use chimera::math::{hypot, js_max, js_min, js_round, ln, log2, log10};
+use chimera::anatomy::human::BodyMix;
 use chimera::phonetics::planner::{PhraseInput, PlanOptions, diphthong_parts, plan_phrases};
 use chimera::phonetics::vowel_data::VOWELS;
+use chimera::vocal_box::VocalBoxVoice;
 use chimera::voice::human_voice::HumanVoice;
 use std::collections::HashMap;
 
@@ -92,7 +94,6 @@ pub fn run(ctx: &Ctx, a: &[String]) -> Result<(), String> {
     let win = hann(2048);
 
     for (si, text) in SENTENCES.iter().enumerate() {
-        let mut v = HumanVoice::new(FS, chimera::anatomy::human::BODY_MALE, 2);
         let phrases = g.to_phrases(text);
         let inputs: Vec<PhraseInput> = phrases
             .iter()
@@ -102,24 +103,47 @@ pub fn run(ctx: &Ctx, a: &[String]) -> Result<(), String> {
                 pause: Some(p.pause),
             })
             .collect();
+        let rate = ctx.emotion.map(|em| em.profile().rate_scale);
         let plan = plan_phrases(
             &inputs,
             &PlanOptions {
                 body: "male".into(),
                 t0: 0.1,
                 f0: Some(110.0),
+                rate,
                 ..Default::default()
             },
         );
-        v.schedule(&plan.gestures);
         let n = js_round(FS * (plan.end + 0.3)) as usize;
         let mut out = vec![0f32; n];
         let (mut port, mut f0t, mut voic) = (Vec::new(), Vec::new(), Vec::new());
-        for block in out.chunks_mut(128) {
-            v.render(block);
-            port.push(v.airway.frame.as_ref().map_or(0.0, |f| f.velum_port));
-            f0t.push(v.glottis.f0_now);
-            voic.push(v.glottis.voicing);
+
+        if ctx.use_vocal_box() {
+            let mut v = VocalBoxVoice::new(FS, BodyMix::MALE);
+            v.set_two_mass(ctx.two_mass);
+            if let Some(em) = ctx.emotion {
+                v.set_emotion(em);
+            }
+            v.schedule(&plan.gestures);
+            for block in out.chunks_mut(128) {
+                v.render(block);
+                let tel = v.core.telemetry();
+                port.push(tel.velum_port_cm2);
+                f0t.push(tel.f0_now_hz);
+                voic.push(tel.voicing);
+            }
+        } else {
+            let mut v = HumanVoice::new(FS, chimera::anatomy::human::BODY_MALE, 2);
+            if let Some(em) = ctx.emotion {
+                v.set_source(&em.profile().to_source_patch(110.0));
+            }
+            v.schedule(&plan.gestures);
+            for block in out.chunks_mut(128) {
+                v.render(block);
+                port.push(v.airway.frame.as_ref().map_or(0.0, |f| f.velum_port));
+                f0t.push(v.glottis.f0_now);
+                voic.push(v.glottis.voicing);
+            }
         }
         let frame_at = |t: f64| {
             js_min(

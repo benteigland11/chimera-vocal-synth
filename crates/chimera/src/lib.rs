@@ -21,6 +21,7 @@ pub mod anatomy {
 pub mod sources {
     pub mod glottis;
     pub mod syrinx;
+    pub mod two_mass;
     pub mod valves;
 }
 

@@ -11,10 +11,11 @@ mod render;
 mod wav;
 
 use chimera::anatomy::human::{BODY_CHILD, BODY_FEMALE, BODY_MALE, BodyMix, HumanBody};
+use chimera::vocal_box::EmotionPreset;
 use std::process::ExitCode;
 
 const USAGE: &str = "\
-usage: chimera <command> [args] [--float]
+usage: chimera <command> [args] [--float] [--vocal-box] [--two-mass] [--emotion <preset>]
 
   render speech  <out> [\"ipa / ipa\"] [male|female|child]
   render text    <out> [\"English text.\"] [male|female|child]
@@ -33,6 +34,12 @@ usage: chimera <command> [args] [--float]
   calibrate vowels     [male|female|child|all] [--out file]
   calibrate consonants [--out file]
 
+Voice options (opt-in; default renders use the standard articulated HumanVoice):
+  --vocal-box         render with the first-principles VocalBoxVoice synthesis core
+  --two-mass          use coupled self-oscillating Two-Mass vocal folds (implies --vocal-box)
+  --emotion <preset>  apply expressive preset: natural, warm, tender, joyful, dramatic,
+                      melancholic, angry, pressed, breathy, whisper, fry, operatic, pop
+
 Output names are stems (<out>.wav). --float writes 32-bit float WAVs instead of 16-bit PCM.
 Calibration writes the tables the engine embeds, in crates/chimera/src/phonetics/.";
 
@@ -45,14 +52,31 @@ pub fn repo_path(rel: &str) -> String {
 }
 
 /// Options shared by every command.
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Ctx {
     /// write 32-bit float WAVs
     pub float: bool,
+    /// render human speech/singing/vowels through `VocalBoxVoice`
+    pub vocal_box: bool,
+    /// enable coupled two-mass vocal-fold oscillation in `VocalBoxVoice`
+    pub two_mass: bool,
+    /// optional expressive emotion preset
+    pub emotion: Option<EmotionPreset>,
 }
 
 impl Ctx {
     pub fn write_wav(&self, path: &str, x: &[f32]) -> Result<(), String> {
         wav::write(path, x, FS as u32, self.float).map_err(|e| format!("{path}: {e}"))
+    }
+
+    #[inline]
+    pub fn use_vocal_box(&self) -> bool {
+        self.vocal_box || self.two_mass
+    }
+
+    #[inline]
+    pub fn is_custom_voice(&self) -> bool {
+        self.vocal_box || self.two_mass || self.emotion.is_some()
     }
 }
 
@@ -91,10 +115,43 @@ pub fn arg<'a>(a: &'a [String], i: usize, default: &'a str) -> &'a str {
     a.get(i).map(String::as_str).unwrap_or(default)
 }
 
-fn run(args: Vec<String>) -> Result<(), String> {
-    let float = args.iter().any(|a| a == "--float");
-    let args: Vec<String> = args.into_iter().filter(|a| a != "--float").collect();
-    let ctx = Ctx { float };
+fn parse_global_flags(raw_args: Vec<String>) -> Result<(Ctx, Vec<String>), String> {
+    let mut ctx = Ctx::default();
+    let mut args = Vec::with_capacity(raw_args.len());
+    let mut it = raw_args.into_iter();
+    while let Some(a) = it.next() {
+        if a == "--float" {
+            ctx.float = true;
+        } else if a == "--vocal-box" {
+            ctx.vocal_box = true;
+        } else if a == "--two-mass" {
+            ctx.two_mass = true;
+            ctx.vocal_box = true;
+        } else if a == "--emotion" {
+            let val = it.next().ok_or_else(|| {
+                format!(
+                    "--emotion requires a preset name ({})",
+                    EmotionPreset::NAMES.join(", ")
+                )
+            })?;
+            ctx.emotion = Some(EmotionPreset::from_name(&val)?);
+        } else if let Some(val) = a.strip_prefix("--emotion=") {
+            if val.is_empty() {
+                return Err(format!(
+                    "--emotion requires a preset name ({})",
+                    EmotionPreset::NAMES.join(", ")
+                ));
+            }
+            ctx.emotion = Some(EmotionPreset::from_name(val)?);
+        } else {
+            args.push(a);
+        }
+    }
+    Ok((ctx, args))
+}
+
+fn run(raw_args: Vec<String>) -> Result<(), String> {
+    let (ctx, args) = parse_global_flags(raw_args)?;
     let cmd: Vec<&str> = args.iter().take(2).map(String::as_str).collect();
     match cmd.as_slice() {
         ["render", kind, ..] => {
