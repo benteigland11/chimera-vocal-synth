@@ -160,14 +160,15 @@ impl EmotionPreset {
         match self {
             Self::Natural => EmotionProfile {
                 pressure_cm_h2o: 8.2,
-                tension: 0.50,
-                brightness: 0.36,
+                tension: 0.46,
+                brightness: 0.22,
+                chest: 0.55,
                 breathiness: 0.05,
                 roughness: 0.03,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.0,
-                epilarynx: 0.05,
+                larynx_cm: -0.18,
+                epilarynx: 0.0,
                 ventricular: 0.0,
                 glottis_noise_scale: 0.86,
                 f0_scale: 1.00,
@@ -177,17 +178,18 @@ impl EmotionPreset {
                 drift_cents: 4.2,
             },
             Self::Warm => EmotionProfile {
-                pressure_cm_h2o: 7.8,
-                tension: 0.44,
-                brightness: 0.22,
-                breathiness: 0.14,
+                pressure_cm_h2o: 8.0,
+                tension: 0.40,
+                brightness: 0.15,
+                chest: 0.92,
+                breathiness: 0.12,
                 roughness: 0.03,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: -0.20,
-                epilarynx: 0.04,
+                larynx_cm: -0.32,
+                epilarynx: 0.0,
                 ventricular: 0.0,
-                glottis_noise_scale: 0.94,
+                glottis_noise_scale: 0.92,
                 f0_scale: 0.96,
                 rate_scale: 0.75,
                 vibrato_depth_cents: 8.0,
@@ -198,12 +200,13 @@ impl EmotionPreset {
                 pressure_cm_h2o: 6.2,
                 tension: 0.34,
                 brightness: 0.12,
+                chest: 0.45,
                 breathiness: 0.34,
                 roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: -0.18,
-                epilarynx: 0.04,
+                larynx_cm: -0.20,
+                epilarynx: 0.02,
                 ventricular: 0.0,
                 glottis_noise_scale: 1.12,
                 f0_scale: 0.97,
@@ -215,13 +218,14 @@ impl EmotionPreset {
             Self::Joyful => EmotionProfile {
                 pressure_cm_h2o: 9.5,
                 tension: 0.58,
-                brightness: 0.50,
+                brightness: 0.48,
+                chest: 0.28,
                 breathiness: 0.07,
                 roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.16,
-                epilarynx: 0.16,
+                larynx_cm: 0.14,
+                epilarynx: 0.14,
                 ventricular: 0.0,
                 glottis_noise_scale: 0.92,
                 f0_scale: 1.18,
@@ -233,13 +237,14 @@ impl EmotionPreset {
             Self::Dramatic => EmotionProfile {
                 pressure_cm_h2o: 10.4,
                 tension: 0.64,
-                brightness: 0.52,
+                brightness: 0.48,
+                chest: 0.72,
                 breathiness: 0.06,
                 roughness: 0.05,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: -0.26,
-                epilarynx: 0.24,
+                larynx_cm: -0.28,
+                epilarynx: 0.22,
                 ventricular: 0.01,
                 glottis_noise_scale: 0.92,
                 f0_scale: 1.08,
@@ -252,12 +257,13 @@ impl EmotionPreset {
                 pressure_cm_h2o: 6.4,
                 tension: 0.36,
                 brightness: 0.14,
+                chest: 0.58,
                 breathiness: 0.30,
                 roughness: 0.05,
                 fry: 0.06,
                 whisper: false,
-                larynx_cm: -0.24,
-                epilarynx: 0.04,
+                larynx_cm: -0.26,
+                epilarynx: 0.02,
                 ventricular: 0.0,
                 glottis_noise_scale: 1.10,
                 f0_scale: 0.88,
@@ -269,12 +275,13 @@ impl EmotionPreset {
             Self::Angry => EmotionProfile {
                 pressure_cm_h2o: 10.6,
                 tension: 0.76,
-                brightness: 0.64,
+                brightness: 0.62,
+                chest: 0.65,
                 breathiness: 0.04,
                 roughness: 0.07,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.16,
+                larynx_cm: 0.12,
                 epilarynx: 0.22,
                 ventricular: 0.02,
                 glottis_noise_scale: 0.95,
@@ -287,13 +294,14 @@ impl EmotionPreset {
             Self::Pressed => EmotionProfile {
                 pressure_cm_h2o: 9.6,
                 tension: 0.88,
-                brightness: 0.86,
+                brightness: 0.84,
+                chest: 0.20,
                 breathiness: 0.02,
                 roughness: 0.05,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.16,
-                epilarynx: 0.24,
+                larynx_cm: 0.18,
+                epilarynx: 0.26,
                 ventricular: 0.03,
                 glottis_noise_scale: 0.85,
                 f0_scale: 1.03,
@@ -306,6 +314,7 @@ impl EmotionPreset {
                 pressure_cm_h2o: 7.2,
                 tension: 0.20,
                 brightness: 0.04,
+                chest: 0.18,
                 breathiness: 0.76,
                 roughness: 0.05,
                 fry: 0.0,
@@ -324,6 +333,7 @@ impl EmotionPreset {
                 pressure_cm_h2o: 9.4,
                 tension: 0.34,
                 brightness: 0.22,
+                chest: 0.0,
                 breathiness: 0.92,
                 roughness: 0.04,
                 fry: 0.0,
@@ -342,6 +352,7 @@ impl EmotionPreset {
                 pressure_cm_h2o: 5.8,
                 tension: 0.56,
                 brightness: 0.34,
+                chest: 0.50,
                 breathiness: 0.06,
                 roughness: 0.06,
                 fry: 0.80,
@@ -359,12 +370,13 @@ impl EmotionPreset {
             Self::Operatic => EmotionProfile {
                 pressure_cm_h2o: 11.0,
                 tension: 0.64,
-                brightness: 0.60,
+                brightness: 0.56,
+                chest: 0.62,
                 breathiness: 0.05,
                 roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: -0.46,
+                larynx_cm: -0.48,
                 epilarynx: 0.62,
                 ventricular: 0.0,
                 glottis_noise_scale: 0.88,
@@ -376,14 +388,15 @@ impl EmotionPreset {
             },
             Self::Pop => EmotionProfile {
                 pressure_cm_h2o: 10.0,
-                tension: 0.68,
-                brightness: 0.64,
+                tension: 0.66,
+                brightness: 0.58,
+                chest: 0.55,
                 breathiness: 0.10,
                 roughness: 0.04,
                 fry: 0.0,
                 whisper: false,
-                larynx_cm: 0.18,
-                epilarynx: 0.46,
+                larynx_cm: 0.10,
+                epilarynx: 0.42,
                 ventricular: 0.0,
                 glottis_noise_scale: 0.95,
                 f0_scale: 1.04,
@@ -402,6 +415,8 @@ pub struct EmotionProfile {
     pub pressure_cm_h2o: f64,
     pub tension: f64,
     pub brightness: f64,
+    /// Thyroarytenoid (TA) chest-register fullness `0..1`.
+    pub chest: f64,
     pub breathiness: f64,
     pub roughness: f64,
     pub fry: f64,
@@ -465,6 +480,7 @@ pub struct VocalBoxVoice {
     pub max_penetration: f64,
 
     emotion: EmotionPreset,
+    chest: f64,
     dec: Decimator,
     ctrl_every: usize,
     ctrl_counter: i64,
@@ -595,6 +611,7 @@ impl VocalBoxVoice {
             output_gain: 4.55e-7 * body_gain,
             max_penetration: 0.1,
             emotion: EmotionPreset::Natural,
+            chest: nat.chest,
             dec: Decimator::new(m),
             ctrl_every: 16 * m,
             ctrl_counter: 0,
@@ -669,10 +686,39 @@ impl VocalBoxVoice {
         self.emotion
     }
 
+    /// Base thyroarytenoid (TA) chest-register fullness (`0..1`).
+    #[inline]
+    pub fn chest(&self) -> f64 {
+        self.chest
+    }
+
+    /// Set base thyroarytenoid (TA) chest-register fullness (`0..1`).
+    pub fn set_chest(&mut self, chest: f64) {
+        self.chest = clamp(chest, 0.0, 1.0);
+        let p = self.emotion.profile();
+        let lrx = clamp(p.larynx_cm - 0.24 * (self.chest - p.chest), -0.75, 0.75);
+        if self.clock == 0.0 {
+            let mut patch = ArticPatch::default();
+            patch.set(ArticKey::Larynx, lrx);
+            self.artic.snap(&patch);
+            let x = self.artic.x;
+            self.airway.apply(&x, 0.0);
+            self.airway.apply(&x, 1.0 / 1000.0);
+            self.airway.apply(&x, 0.0);
+            self.airway.net.snap_to_targets();
+            self.airway.net.reset_deterministic();
+        } else {
+            self.artic.target.set(ArticKey::Larynx, lrx);
+        }
+        self.apply_source();
+        self.ctrl_counter = 0;
+    }
+
     /// Set expressive [`EmotionPreset`], updating respiratory, laryngeal, and anatomical posture.
     pub fn set_emotion(&mut self, preset: EmotionPreset) {
         self.emotion = preset;
         let p = preset.profile();
+        self.chest = p.chest;
         self.source.pressure = p.pressure_cm_h2o;
         self.source.breathiness = p.breathiness;
         self.source.tension = p.tension;
@@ -848,8 +894,11 @@ impl VocalBoxVoice {
 
         let effort = clamp((s.pressure.abs() - 3.0) / 10.0, 0.0, 1.0);
         let chink = self.anatomy.base_chink_cm2 + 0.032 * s.breathiness * kf;
+        let chest_eff = clamp(self.chest * reg.chest_mix, 0.0, 1.0);
         let oq = clamp(
-            0.76 - 0.34 * s.tension - 0.05 * (effort - 0.50) + reg.oq_shift,
+            0.76 - 0.34 * s.tension - 0.05 * (effort - 0.50)
+                + self.anatomy.modal_oq_offset
+                + reg.oq_shift,
             0.28,
             0.94,
         );
@@ -857,7 +906,11 @@ impl VocalBoxVoice {
         let by_tension = 0.62 * s.tension + 0.90 * js_max(0.0, s.tension - 0.56);
         let closure_sharpness =
             clamp((by_tension + 0.80 * bright) * reg.sharpness_scale, 0.0, 1.0);
-        let skew = clamp(0.57 + 0.16 * s.tension + 0.18 * bright, 0.38, 0.86);
+        let skew = clamp(
+            0.55 + 0.16 * s.tension + 0.18 * bright - 0.09 * chest_eff,
+            0.38,
+            0.86,
+        );
 
         let jitter = 0.0011 + 0.016 * s.roughness;
         let shimmer = 0.0045 + 0.13 * s.roughness;
@@ -868,6 +921,7 @@ impl VocalBoxVoice {
         };
 
         let idle = self.clock == 0.0;
+        self.folds.chest = chest_eff;
         let g = &mut self.folds.params;
         g.f0 = self.f0;
         g.amplitude = amp;
@@ -996,6 +1050,10 @@ impl VocalBoxVoice {
         let mut breath_act = 0.0;
         let mut breath_val = 0.0;
         let mut f0_target = self.source.f0 * f0_scale_eff;
+        let mut eff_tension = clamp(self.source.tension, 0.0, 1.0);
+        let mut eff_fry = clamp(self.source.fry, 0.0, 1.0);
+        let mut eff_brightness = clamp(self.source.brightness, 0.0, 1.0);
+        let mut eff_chest = clamp(self.chest, 0.0, 1.0);
 
         if self.score.size() > 0 {
             self.score.blend_all(t, &mut self.blend);
@@ -1054,6 +1112,28 @@ impl VocalBoxVoice {
                 }
                 self.artic.speed[i] = sp;
             }
+            // 4. Blend high-dimensional phonation & TA chest-register gesture channels:
+            let blend_src = |base: f64, key: ControlKey, base_w: f64| -> f64 {
+                let bk = self.blend[key.index()];
+                if bk.weight > 0.0 {
+                    clamp(
+                        (base * base_w + bk.value * bk.weight) / (base_w + bk.weight),
+                        0.0,
+                        1.0,
+                    )
+                } else {
+                    clamp(base, 0.0, 1.0)
+                }
+            };
+            eff_tension = blend_src(self.source.tension, ControlKey::TENSION, 0.08);
+            eff_fry = blend_src(self.source.fry, ControlKey::FRY, 0.08);
+            eff_brightness = blend_src(self.source.brightness, ControlKey::BRIGHTNESS, 0.08);
+            eff_chest = blend_src(self.chest, ControlKey::CHEST, 0.08);
+            if self.blend[ArticKey::Larynx.index()].weight <= 0.0 {
+                let lrx = clamp(emo.larynx_cm - 0.24 * (eff_chest - emo.chest), -0.75, 0.75);
+                self.artic.target.set(ArticKey::Larynx, lrx);
+            }
+
             let b = &self.blend;
             self.artic.step(dt, Some(&b[..]), 0.05);
 
@@ -1171,7 +1251,7 @@ impl VocalBoxVoice {
             + 0.32
                 * js_max(0.0, 1.0 / kf_jet - 1.0)
                 * self.folds.voicing
-                * (1.0 - 0.35 * clamp(self.source.tension, 0.0, 1.0));
+                * (1.0 - 0.35 * eff_tension);
         self.airway.noise_gain.glottis =
             self.base_glottis_noise * emo.glottis_noise_scale * voiced_jet;
         self.airway.apply(&x, dt);
@@ -1249,24 +1329,35 @@ impl VocalBoxVoice {
 
         let s = self.source;
         let kf = self.anatomy.fold_area_scale;
-        let reg = register_state(self.f0, self.anatomy.speaking_f0_hz, s.tension);
+        let reg = register_state(self.f0, self.anatomy.speaking_f0_hz, eff_tension);
         let effort = clamp(((p_eff_cm_h2o * self.gate).abs() - 3.0) / 10.0, 0.0, 1.0);
         let amp = 0.17 * kf * reg.excursion_scale * if s.voiced { 1.0 } else { 0.0 };
+        let chest_eff = clamp(eff_chest * reg.chest_mix, 0.0, 1.0);
         let oq = clamp(
-            0.76 - 0.34 * s.tension - 0.05 * (effort - 0.50) + reg.oq_shift,
+            0.76 - 0.34 * eff_tension - 0.05 * (effort - 0.50)
+                + self.anatomy.modal_oq_offset
+                + reg.oq_shift,
             0.28,
             0.94,
         );
-        let bright = s.brightness - DEFAULT_SOURCE.brightness;
-        let by_tension = 0.62 * s.tension + 0.90 * js_max(0.0, s.tension - 0.56);
+        let bright = eff_brightness - DEFAULT_SOURCE.brightness;
+        let by_tension = 0.62 * eff_tension + 0.90 * js_max(0.0, eff_tension - 0.56);
         let sharp = clamp((by_tension + 0.80 * bright) * reg.sharpness_scale, 0.0, 1.0);
+        let skew = clamp(
+            0.55 + 0.16 * eff_tension + 0.18 * bright - 0.09 * chest_eff,
+            0.38,
+            0.86,
+        );
 
+        self.folds.chest = chest_eff;
         let g = &mut self.folds.params;
         g.f0 = self.f0;
         g.effort = effort;
         g.amplitude = amp;
         g.open_quotient = oq;
         g.closure_sharpness = sharp;
+        g.skew = skew;
+        g.fry = eff_fry;
 
         // Smoothed mean volume velocity per tract section for telemetry visuals
         let a_flow = 1.0 - exp(-dt / 0.03);

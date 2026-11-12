@@ -1,17 +1,17 @@
 /**
- * The engine's binary gesture records (layout version 1, crates/chimera-wasm/src/lib.rs): how
+ * The engine's binary gesture records (layout version 2, crates/chimera-wasm/src/lib.rs): how
  * gestures cross into the wasm engine on the audio thread, where JSON and TextEncoder are out of
- * reach. 272 little-endian bytes per gesture; NaN marks an absent value.
+ * reach. 304 little-endian bytes per gesture; NaN marks an absent value.
  */
 import type { Gesture } from "./types.ts";
 
-export const LAYOUT_VERSION = 1;
-export const GESTURE_RECORD = 272;
+export const LAYOUT_VERSION = 2;
+export const GESTURE_RECORD = 304;
 
 /** Control keys in the engine's order: the 17 articulators, then the source channels. */
 export const CONTROL_KEYS = [
   "jaw", "tbX", "tbY", "ttX", "ttY", "ttCurl", "root", "lipAp", "lipProt", "lipWidth", "labiodental", "velum", "larynx", "epilarynx", "ventricular", "lateral", "dorsum",
-  "abduction", "closure", "breath", "f0", "vibrato",
+  "abduction", "closure", "breath", "f0", "vibrato", "tension", "fry", "brightness", "chest",
 ] as const;
 const KEY_INDEX: Record<string, number> = Object.fromEntries(CONTROL_KEYS.map((k, i) => [k, i]));
 const LABEL_CAP = 24;
@@ -59,7 +59,7 @@ export function writeGestures(buf: ArrayBuffer, at: number, gestures: readonly G
       const k = KEY_INDEX[key];
       if (k !== undefined && value !== undefined) dv.setFloat64(o + 64 + k * 8, value, true);
     }
-    if (g.label === undefined) bytes[o + 240] = 255;
+    if (g.label === undefined) bytes[o + 272] = 255;
     else {
       let b = utf8(g.label);
       if (b.length > LABEL_CAP) {
@@ -68,8 +68,8 @@ export function writeGestures(buf: ArrayBuffer, at: number, gestures: readonly G
         while (n > 0 && (b[n] & 0xc0) === 0x80) n--;
         b = b.slice(0, n);
       }
-      bytes[o + 240] = b.length;
-      bytes.set(b, o + 241);
+      bytes[o + 272] = b.length;
+      bytes.set(b, o + 273);
     }
   }
   return n;

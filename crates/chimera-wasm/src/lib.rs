@@ -7,7 +7,7 @@
 //! object's lifetime; JavaScript must still re-create its typed-array views whenever
 //! `memory.buffer` changes (memory growth detaches them), and copy telemetry before the next call.
 //!
-//! # Gesture records (layout version 1, [`GESTURE_RECORD`] = 272 bytes, little-endian)
+//! # Gesture records (layout version 2, [`GESTURE_RECORD`] = 304 bytes, little-endian)
 //! | offset | type        | field |
 //! |-------:|-------------|-------|
 //! | 0      | f64         | t0 |
@@ -18,10 +18,10 @@
 //! | 40     | f64         | speed (NaN: absent) |
 //! | 48     | f64         | releaseHold (NaN: absent) |
 //! | 56     | f64         | tag (NaN: absent) |
-//! | 64     | 22 × f64    | targets in ControlKey order: the 17 articulators (ArticKey order), then abduction, closure, breath, f0, vibrato (NaN: absent) |
-//! | 240    | u8          | label length in bytes (255: no label) |
-//! | 241    | 24 × u8     | label, UTF-8, cut at a character boundary |
-//! | 265    | 7 × u8      | padding |
+//! | 64     | 26 × f64    | targets in ControlKey order: the 17 articulators (ArticKey order), then abduction, closure, breath, f0, vibrato, tension, fry, brightness, chest (NaN: absent) |
+//! | 272    | u8          | label length in bytes (255: no label) |
+//! | 273    | 24 × u8     | label, UTF-8, cut at a character boundary |
+//! | 297    | 7 × u8      | padding |
 //!
 //! # Beat-step records ([`STEP_RECORD`] = 48 bytes, in the same record area)
 //! | offset | type     | field |
@@ -40,9 +40,9 @@ use chimera::engine::{Engine, MAX_SCHEDULE};
 use chimera::phonetics::beatbox::BeatStep;
 use chimera::voice::human_voice::{SourcePatch, VoiceTelemetry};
 
-pub const GESTURE_RECORD: usize = 272;
+pub const GESTURE_RECORD: usize = 304;
 pub const STEP_RECORD: usize = 48;
-pub const LAYOUT_VERSION: u32 = 1;
+pub const LAYOUT_VERSION: u32 = 2;
 /// Largest `engine_render` request (frames).
 pub const MAX_RENDER: usize = 4096;
 
@@ -89,8 +89,8 @@ pub fn read_gesture(b: &[u8]) -> Gesture {
     for k in 0..N_CONTROL {
         targets.0[k] = f(8 + k);
     }
-    let len = b[240];
-    let label = if len == 255 { None } else { Some(Label::from_bytes(&b[241..241 + (len as usize).min(Label::CAP)])) };
+    let len = b[272];
+    let label = if len == 255 { None } else { Some(Label::from_bytes(&b[273..273 + (len as usize).min(Label::CAP)])) };
     Gesture { t0: f(0), t1: f(1), ramp_in: f(2), ramp_out: f(3), strength: f(4), speed: opt(f(5)), release_hold: opt(f(6)), tag: opt(f(7)), targets, label }
 }
 
@@ -104,11 +104,11 @@ pub fn write_gesture(g: &Gesture, b: &mut [u8]) {
         put(8 + k, g.targets.0[k]);
     }
     match &g.label {
-        None => b[240] = 255,
+        None => b[272] = 255,
         Some(l) => {
             let bytes = l.as_bytes();
-            b[240] = bytes.len() as u8;
-            b[241..241 + bytes.len()].copy_from_slice(bytes);
+            b[272] = bytes.len() as u8;
+            b[273..273 + bytes.len()].copy_from_slice(bytes);
         }
     }
 }

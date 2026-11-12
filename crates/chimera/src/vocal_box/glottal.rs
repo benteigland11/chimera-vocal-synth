@@ -17,6 +17,8 @@ pub struct BodyAnatomy {
     pub fold_area_scale: f64,
     pub base_chink_cm2: f64,
     pub speaking_f0_hz: f64,
+    /// Natural anatomical modal open-quotient offset (Holmberg 1988: female/child > male).
+    pub modal_oq_offset: f64,
 }
 
 impl BodyAnatomy {
@@ -30,14 +32,19 @@ impl BodyAnatomy {
             BodyName::Child => 0.36,
         });
         let base_chink_cm2 = clean.blend(|b| match b {
-            BodyName::Male => 0.0018,
-            BodyName::Female => 0.0048,
-            BodyName::Child => 0.0030,
+            BodyName::Male => 0.0024,
+            BodyName::Female => 0.0058,
+            BodyName::Child => 0.0038,
         });
         let speaking_f0_hz = clean.blend(|b| match b {
             BodyName::Male => 110.0,
             BodyName::Female => 205.0,
             BodyName::Child => 275.0,
+        });
+        let modal_oq_offset = clean.blend(|b| match b {
+            BodyName::Male => 0.015,
+            BodyName::Female => 0.070,
+            BodyName::Child => 0.080,
         });
         Self {
             mix: clean,
@@ -46,6 +53,7 @@ impl BodyAnatomy {
             fold_area_scale,
             base_chink_cm2,
             speaking_f0_hz,
+            modal_oq_offset,
         }
     }
 }
@@ -55,6 +63,8 @@ impl BodyAnatomy {
 pub struct Registration {
     /// `0.0` in modal/chest register, rising smoothly toward `1.0` in upper head/soprano register.
     pub head_mix: f64,
+    /// `1.0` in speech & lower chest register, tapering toward `0.0` in upper head/soprano register.
+    pub chest_mix: f64,
     /// Vibratory fold cross-section multiplier (`1.0` chest -> `~0.68` high soprano).
     pub excursion_scale: f64,
     /// Open-quotient shift due to longitudinal CT fold thinning.
@@ -70,8 +80,10 @@ pub fn register_state(f0_hz: f64, speaking_f0_hz: f64, tension: f64) -> Registra
     // Belt / high medial tension delays head-voice thinning upward in pitch
     let shift = 0.30 * clamp(tension - 0.50, -0.4, 0.5);
     let head_mix = smoothstep(0.45 + shift, 1.75 + shift, oct_above);
+    let chest_mix = 1.0 - smoothstep(-0.15 + shift, 1.15 + shift, oct_above);
     Registration {
         head_mix,
+        chest_mix,
         excursion_scale: 1.0 - 0.32 * head_mix,
         oq_shift: 0.11 * head_mix * (1.0 - 0.45 * clamp(tension, 0.0, 1.0)),
         sharpness_scale: 1.0 - 0.24 * head_mix,

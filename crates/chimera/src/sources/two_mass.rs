@@ -59,6 +59,8 @@ pub struct TwoMassGlottis {
     pub f0_now: f64,
     /// Nominal phonation threshold pressure ($\text{dyn/cm}^2$).
     pub threshold: f64,
+    /// Thyroarytenoid (TA) chest-register fullness `0..1` (0 = neutral/light, 1 = deep chest).
+    pub chest: f64,
 
     // Lower (1) and upper (2) lateral displacements from pre-phonatory position (cm) & velocities (cm/s)
     x1: f64,
@@ -100,6 +102,7 @@ pub struct TwoMassGlottis {
     f0_sm: f64,
     oq_sm: f64,
     sharp_sm: f64,
+    chest_sm: f64,
     dp_sm: f64,
     dp_coef: f64,
     voicing_sm: f64,
@@ -125,6 +128,7 @@ impl TwoMassGlottis {
             area: 0.0,
             f0_now: DEFAULT_GLOTTIS.f0,
             threshold: 2.1 * CM_H2O,
+            chest: 0.0,
             x1: 0.0020,
             v1: 0.0,
             x2: 0.0,
@@ -158,6 +162,7 @@ impl TwoMassGlottis {
             f0_sm: DEFAULT_GLOTTIS.f0,
             oq_sm: DEFAULT_GLOTTIS.open_quotient,
             sharp_sm: DEFAULT_GLOTTIS.closure_sharpness,
+            chest_sm: 0.0,
             dp_sm: 0.0,
             dp_coef: 1.0 - exp(-TAU * 42.0 / fs_clean),
             voicing_sm: 0.0,
@@ -173,8 +178,11 @@ impl TwoMassGlottis {
     pub fn reset(&mut self) {
         let fs = self.fs;
         let params = self.params;
+        let chest = self.chest;
         *self = Self::new(fs);
         self.params = params;
+        self.chest = chest;
+        self.chest_sm = clamp(chest, 0.0, 1.0);
         self.f0_now = params.f0;
         self.f0_sm = params.f0;
         self.oq_sm = params.open_quotient;
@@ -190,6 +198,7 @@ impl TwoMassGlottis {
         self.measured_f0 = self.params.f0;
         self.oq_sm = clamp(self.params.open_quotient, 0.30, 0.92);
         self.sharp_sm = clamp(self.params.closure_sharpness, 0.0, 1.0);
+        self.chest_sm = clamp(self.chest, 0.0, 1.0);
     }
 
     /// Synchronize mucosal-wave displacement & velocity to normalized glottal phase `phi` (`0..1`).
@@ -283,6 +292,7 @@ impl TwoMassGlottis {
         self.closure_sm += sc * (clamp(p.closure, 0.0, 1.0) - self.closure_sm);
         self.oq_sm += sc * (clamp(p.open_quotient, 0.30, 0.92) - self.oq_sm);
         self.sharp_sm += sc * (clamp(p.closure_sharpness, 0.0, 1.0) - self.sharp_sm);
+        self.chest_sm += sc * (clamp(self.chest, 0.0, 1.0) - self.chest_sm);
         self.q_trim_sm += sc * (self.q_trim - self.q_trim_sm);
         self.period_scale_sm += sc * (self.cycle_period_scale - self.period_scale_sm);
         self.cycle_amp_sm += sc * (self.cycle_amp - self.cycle_amp_sm);
@@ -298,20 +308,22 @@ impl TwoMassGlottis {
         let drive_gate = p_gate * abd_gate * (1.0 - self.closure_sm);
 
         // Membranous pre-phonatory neutral half-width x0 (cm), accounting for two-mass mucosal
-        // phase-lag overlap (~70 deg) so modal speech achieves a rounded ~60% open phase AND a
-        // complete ~40% closed seal (decoupling the subglottal trachea without sawtooth pressing).
-        let oq_u = clamp((self.oq_sm - 0.34) / 0.52, 0.0, 1.0);
-        let x0_modal = lerp(0.0036, 0.0142, oq_u)
+        // phase-lag overlap (~66 deg) and TA chest-register thickening so modal speech achieves a
+        // true ~58-66% open phase (strong H1 fundamental) AND a complete ~34-42% closed seal.
+        let oq_u = clamp((self.oq_sm - 0.34) / 0.56, 0.0, 1.0);
+        let x0_modal = lerp(0.0062, 0.0206, oq_u)
+            + 0.0036 * self.chest_sm
             + 0.00014 * clamp(p.drift, 0.0, 8.0) * self.flutter_sm;
-        let x0 = clamp(x0_modal - 0.018 * self.closure_sm, -0.010, 0.045);
+        let x0 = clamp(x0_modal - 0.022 * self.closure_sm, -0.010, 0.045);
 
         // Coupled-eigenmode natural-frequency calibration (Ishizaka & Flanagan 1972; Titze 1994):
         // Passive upper-lip damping (zeta_2 = 0.33) keeps the superior vocal-fold margin following
         // the lower mass smoothly via shear coupling kc without resonant whip overdrive, while open-loop
         // stiffness preserves physical delta-P -> F0 microprosody across consonants and breath peaks.
-        let col_k = 0.85 + 0.65 * self.sharp_sm;
+        let sharp_eff = self.sharp_sm * (1.0 - 0.22 * self.chest_sm);
+        let col_k = (0.82 + 0.62 * sharp_eff) * (1.0 - 0.16 * self.chest_sm);
         let skew_close = 1.08 + 0.36 * clamp(p.skew - 0.45, 0.0, 0.45);
-        let phi_col = clamp((0.017 - x0_modal) / 0.028, 0.0, 0.50);
+        let phi_col = clamp((0.020 - x0_modal) / 0.028, 0.0, 0.50);
         let col_shift = (1.0 - phi_col) + phi_col / sqrt(1.0 + 0.58 * col_k);
 
         let f0_inst = clamp(f0_target / self.period_scale_sm, 22.0, 1800.0);
@@ -335,8 +347,9 @@ impl TwoMassGlottis {
 
         let c1_open = 2.0 * 0.082 * (1.14 * omega);
         let c2_open = 2.0 * 0.330 * (0.88 * omega);
-        let r_target = 0.0255
+        let r_target = 0.0285
             * (0.88 + 0.17 * clamp(p_mean, 0.0, 1.8))
+            * (1.0 + 0.10 * self.chest_sm)
             * smoothstep(0.02, 0.26, drive_gate)
             * self.cycle_amp_sm;
 
@@ -407,9 +420,9 @@ impl TwoMassGlottis {
         let a1 = x0 + self.x1;
         let a2 = x0 + self.x2;
         let diff_a = a1 - a2;
-        // Continuous vertical mucosal lip rounding (`eps = 0.0055 cm`) eliminates the mid-open
-        // tent-corner impulse where a1 crosses a2 (closure excitation > 1.5x mid-open curvature!).
-        let eps = 0.0055;
+        // Continuous vertical mucosal lip rounding (`eps >= 0.0055 cm`, slightly rounder in TA chest)
+        // eliminates the mid-open tent-corner impulse where a1 crosses a2.
+        let eps = 0.0055 + 0.0018 * self.chest_sm;
         let a_min_smooth = 0.5 * (a1 + a2 + 0.58 * eps - sqrt(diff_a * diff_a + eps * eps));
 
         // Sub-sample opening-crossing telemetry & slow (~250 ms) human auditory-reflex trim:
@@ -518,13 +531,13 @@ impl TwoMassGlottis {
         // Upper margin peels apart gradually when opening (a1 > a2 -> u_close ~ 0), while lower
         // margin closes crisply under Bernoulli suction (a1 < a2 -> u_close ~ 1).
         let u_close = 0.5 * (1.0 - tanh(diff_a / 0.0040));
-        let d_open = lerp(0.0066, 0.0038, self.sharp_sm);
-        let d_close = lerp(0.0038, 0.0007, self.sharp_sm);
+        let d_open = lerp(0.0066, 0.0038, sharp_eff);
+        let d_close = lerp(0.0038, 0.0007, sharp_eff);
         let zipper_delta = lerp(d_open, d_close, u_close);
         let osc_env =
             smoothstep(0.015, 0.22, self.voicing) * smoothstep(0.0008, 0.0045, sqrt(amp1_sq));
         let h_vib = zipper_area_c1(a_min_smooth, zipper_delta) * osc_env;
-        let dyn_gain = (self.amp_sm * 0.88) / 0.0235;
+        let dyn_gain = (self.amp_sm * 0.88) / 0.0305;
 
         let static_abduct = self.abduct_sm * (1.0 - 0.92 * self.closure_sm);
         let chink = js_max(0.0, p.chink) * (1.0 - 0.92 * self.closure_sm);

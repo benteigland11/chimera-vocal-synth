@@ -26,9 +26,17 @@ pub enum SourceKey {
     F0,
     /// vibrato depth (cents): singers let it bloom a few hundred ms into a held note
     Vibrato,
+    /// medial & longitudinal fold tension 0..1 (lax/modal to pressed/belted)
+    Tension,
+    /// vocal fry / pulse-register creak 0..1
+    Fry,
+    /// glottal closing edge / spectral brightness 0..1
+    Brightness,
+    /// thyroarytenoid (TA) chest register fullness & thoracic warmth 0..1
+    Chest,
 }
 
-pub const N_SOURCE: usize = 5;
+pub const N_SOURCE: usize = 9;
 /// Articulators then source channels.
 pub const N_CONTROL: usize = N_ARTIC + N_SOURCE;
 
@@ -39,7 +47,17 @@ pub enum ControlKey {
     Source(SourceKey),
 }
 
-pub const SOURCE_NAMES: [&str; N_SOURCE] = ["abduction", "closure", "breath", "f0", "vibrato"];
+pub const SOURCE_NAMES: [&str; N_SOURCE] = [
+    "abduction",
+    "closure",
+    "breath",
+    "f0",
+    "vibrato",
+    "tension",
+    "fry",
+    "brightness",
+    "chest",
+];
 
 impl ControlKey {
     pub const ABDUCTION: ControlKey = ControlKey::Source(SourceKey::Abduction);
@@ -47,6 +65,10 @@ impl ControlKey {
     pub const BREATH: ControlKey = ControlKey::Source(SourceKey::Breath);
     pub const F0: ControlKey = ControlKey::Source(SourceKey::F0);
     pub const VIBRATO: ControlKey = ControlKey::Source(SourceKey::Vibrato);
+    pub const TENSION: ControlKey = ControlKey::Source(SourceKey::Tension);
+    pub const FRY: ControlKey = ControlKey::Source(SourceKey::Fry);
+    pub const BRIGHTNESS: ControlKey = ControlKey::Source(SourceKey::Brightness);
+    pub const CHEST: ControlKey = ControlKey::Source(SourceKey::Chest);
 
     #[inline]
     pub fn index(self) -> usize {
@@ -59,7 +81,19 @@ impl ControlKey {
         if i < N_ARTIC {
             ControlKey::Artic(ArticKey::ALL[i])
         } else {
-            ControlKey::Source([SourceKey::Abduction, SourceKey::Closure, SourceKey::Breath, SourceKey::F0, SourceKey::Vibrato][i - N_ARTIC])
+            ControlKey::Source(
+                [
+                    SourceKey::Abduction,
+                    SourceKey::Closure,
+                    SourceKey::Breath,
+                    SourceKey::F0,
+                    SourceKey::Vibrato,
+                    SourceKey::Tension,
+                    SourceKey::Fry,
+                    SourceKey::Brightness,
+                    SourceKey::Chest,
+                ][i - N_ARTIC],
+            )
         }
     }
     pub fn name(self) -> &'static str {
@@ -79,6 +113,12 @@ impl ControlKey {
 impl From<ArticKey> for ControlKey {
     fn from(k: ArticKey) -> Self {
         ControlKey::Artic(k)
+    }
+}
+
+impl From<SourceKey> for ControlKey {
+    fn from(s: SourceKey) -> Self {
+        ControlKey::Source(s)
     }
 }
 

@@ -108,3 +108,35 @@ fn the_audio_thread_abi_does_not_allocate() {
         engine_free(h);
     }
 }
+
+#[test]
+fn gesture_wire_v2_roundtrips_expanded_source_keys() {
+    use chimera::control::score::{ControlKey, Gesture, Targets};
+    assert_eq!(LAYOUT_VERSION, 2);
+    assert_eq!(GESTURE_RECORD, 304);
+    let mut rec = [0u8; GESTURE_RECORD];
+    let g = Gesture {
+        t0: 0.125,
+        t1: 0.625,
+        ramp_in: 0.04,
+        ramp_out: 0.05,
+        strength: 2.5,
+        speed: Some(1.1),
+        release_hold: Some(0.02),
+        tag: Some(7.0),
+        targets: Targets::default()
+            .with(ControlKey::TENSION, 0.72)
+            .with(ControlKey::FRY, 0.35)
+            .with(ControlKey::BRIGHTNESS, 0.18)
+            .with(ControlKey::CHEST, 0.94),
+        label: Some("chest_tone".into()),
+    };
+    write_gesture(&g, &mut rec);
+    let decoded = read_gesture(&rec);
+    assert_eq!(decoded.targets.get(ControlKey::TENSION), Some(0.72));
+    assert_eq!(decoded.targets.get(ControlKey::FRY), Some(0.35));
+    assert_eq!(decoded.targets.get(ControlKey::BRIGHTNESS), Some(0.18));
+    assert_eq!(decoded.targets.get(ControlKey::CHEST), Some(0.94));
+    assert_eq!(decoded.label.as_ref().map(|l| l.as_str()), Some("chest_tone"));
+}
+

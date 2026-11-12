@@ -1,6 +1,6 @@
 /** Engine types as the UI sees them (the JSON shapes of the Rust engine's serde types). */
 export type ArticKey = "jaw" | "tbX" | "tbY" | "ttX" | "ttY" | "ttCurl" | "root" | "lipAp" | "lipProt" | "lipWidth" | "labiodental" | "velum" | "larynx" | "epilarynx" | "ventricular" | "lateral" | "dorsum";
-export type SourceKey = "abduction" | "closure" | "breath" | "f0" | "vibrato";
+export type SourceKey = "abduction" | "closure" | "breath" | "f0" | "vibrato" | "tension" | "fry" | "brightness" | "chest";
 export type ControlKey = ArticKey | SourceKey;
 
 export interface Gesture {

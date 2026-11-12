@@ -28,6 +28,7 @@ static GLOBAL: CountingAlloc = CountingAlloc;
 use chimera::analysis::fft::{Fft, hann};
 use chimera::analysis::pitch::{YinOpts, yin_pitch};
 use chimera::anatomy::human::BodyMix;
+use chimera::control::score::{ControlKey, Gesture, Targets};
 use chimera::physics::CM_H2O;
 use chimera::phonetics::{Segment, Syllable};
 use chimera::phonetics::ipa::tokenize_ipa;
@@ -973,3 +974,159 @@ fn consonant_intelligibility_and_sibilant_balance_across_bodies() {
         );
     }
 }
+
+#[test]
+fn chest_tone_and_per_gesture_source_keys_modulate_acoustically() {
+    chimera::init();
+
+    // 1. Compare high-chest Warm vs low-chest bright phonation on connected speech across Male & Female:
+    //    Chest must enrich low-band warmth (80-320 Hz re 600-2400 Hz) while preserving complete closure.
+    for (label, body, f0, lo_band) in [
+        ("male", BodyMix::MALE, 112.0, (80.0, 260.0)),
+        ("female", BodyMix::FEMALE, 205.0, (165.0, 310.0)),
+    ] {
+        let plan = plan_utterance(
+            &tokenize_ipa("ˈɑlɑmɑ"),
+            &PlanOptions {
+                body,
+                t0: 0.04,
+                f0: Some(f0),
+                ..Default::default()
+            },
+        );
+        let n = ((plan.end + 0.16) * FS).round() as usize;
+        let s0 = (0.10 * FS) as usize;
+        let s1 = ((plan.end - 0.04) * FS) as usize;
+
+        let mut v_chest = VocalBoxVoice::new(FS, body);
+        v_chest.set_source(&SourcePatch::f0(f0));
+        v_chest.set_emotion(EmotionPreset::Warm);
+        v_chest.set_chest(1.0);
+        v_chest.schedule(&plan.gestures);
+        let mut out_chest = vec![0.0f32; n];
+        let mut min_area = f64::INFINITY;
+        for ch in out_chest.chunks_mut(16) {
+            v_chest.render(ch);
+            let tel = v_chest.instant_telemetry();
+            if tel.voicing > 0.80 {
+                min_area = min_area.min(tel.glottal_area_cm2);
+            }
+        }
+        assert!(
+            min_area < 0.010,
+            "{label} deep chest phonation failed glottal closure: min_area={min_area:.5} cm^2"
+        );
+
+        let mut v_light = VocalBoxVoice::new(FS, body);
+        v_light.set_source(&SourcePatch {
+            f0: Some(f0),
+            tension: Some(0.80),
+            brightness: Some(0.82),
+            ..Default::default()
+        });
+        v_light.set_chest(0.0);
+        v_light.schedule(&plan.gestures);
+        let mut out_light = vec![0.0f32; n];
+        v_light.render(&mut out_light);
+
+        let chest_warmth = band_energy_ratio_db(&out_chest[s0..s1], FS, lo_band.0, lo_band.1)
+            - band_energy_ratio_db(&out_chest[s0..s1], FS, 600.0, 2400.0);
+        let light_warmth = band_energy_ratio_db(&out_light[s0..s1], FS, lo_band.0, lo_band.1)
+            - band_energy_ratio_db(&out_light[s0..s1], FS, 600.0, 2400.0);
+        assert!(
+            chest_warmth > light_warmth + 2.5,
+            "{label} chest warmth ({chest_warmth:.1} dB) must exceed bright non-chest ({light_warmth:.1} dB) by >2.5 dB"
+        );
+    }
+
+    // 2. Per-gesture ControlKey::{CHEST, TENSION, BRIGHTNESS, FRY} modulate dynamically mid-utterance
+    //    with zero heap allocations during render & telemetry.
+    let mut g_chest = Gesture {
+        t0: 0.25,
+        t1: 0.65,
+        ramp_in: 0.04,
+        ramp_out: 0.04,
+        strength: 2.0,
+        targets: Targets::default().with(ControlKey::CHEST, 1.0).with(ControlKey::BRIGHTNESS, 0.10),
+        speed: None,
+        release_hold: None,
+        label: Some("chest".into()),
+        tag: None,
+    };
+    g_chest.targets.set(ControlKey::TENSION, 0.36);
+
+    let g_press = Gesture {
+        t0: 0.70,
+        t1: 1.10,
+        ramp_in: 0.04,
+        ramp_out: 0.04,
+        strength: 2.0,
+        targets: Targets::default()
+            .with(ControlKey::CHEST, 0.0)
+            .with(ControlKey::TENSION, 0.90)
+            .with(ControlKey::BRIGHTNESS, 0.88),
+        speed: None,
+        release_hold: None,
+        label: Some("press".into()),
+        tag: None,
+    };
+
+    let g_fry = Gesture {
+        t0: 1.15,
+        t1: 1.55,
+        ramp_in: 0.04,
+        ramp_out: 0.04,
+        strength: 2.0,
+        targets: Targets::default().with(ControlKey::FRY, 0.90),
+        speed: None,
+        release_hold: None,
+        label: Some("fry".into()),
+        tag: None,
+    };
+
+    let mut v = VocalBoxVoice::new(FS, BodyMix::MALE);
+    v.set_source(&SourcePatch::f0(120.0));
+    v.set_gate(1.0);
+    v.schedule(&[g_chest, g_press, g_fry]);
+    let mut tele = VoiceTelemetry::default();
+    let mut warmup = [0.0f32; 128];
+    v.render(&mut warmup);
+    v.telemetry(&mut tele);
+    let total = (1.60 * FS) as usize;
+    let mut buf = vec![0.0f32; total];
+
+    let before = TL_ALLOC_COUNT.get();
+    let mut fry_f0_acc = 0.0;
+    let mut fry_f0_n = 0usize;
+    for (bi, ch) in buf.chunks_mut(128).enumerate() {
+        v.render(ch);
+        if bi % 8 == 0 {
+            v.telemetry(&mut tele);
+        }
+        if v.clock >= 1.25 && v.clock <= 1.50 {
+            let it = v.instant_telemetry();
+            if it.voicing > 0.3 {
+                fry_f0_acc += it.f0_now_hz;
+                fry_f0_n += 1;
+            }
+        }
+    }
+    let after = TL_ALLOC_COUNT.get();
+    assert_eq!(after - before, 0, "per-gesture source modulation allocated on RT thread");
+
+    let sl_chest = &buf[(0.35 * FS) as usize..(0.60 * FS) as usize];
+    let sl_press = &buf[(0.80 * FS) as usize..(1.05 * FS) as usize];
+    let chest_tilt = band_energy_ratio_db(sl_chest, FS, 90.0, 240.0)
+        - band_energy_ratio_db(sl_chest, FS, 700.0, 2800.0);
+    let press_tilt = band_energy_ratio_db(sl_press, FS, 90.0, 240.0)
+        - band_energy_ratio_db(sl_press, FS, 700.0, 2800.0);
+    assert!(
+        chest_tilt > press_tilt + 3.0,
+        "per-gesture CHEST ({chest_tilt:.1} dB) must be significantly warmer than TENSION+BRIGHTNESS ({press_tilt:.1} dB)"
+    );
+    assert!(
+        fry_f0_n > 0 && (fry_f0_acc / fry_f0_n as f64) < 105.0,
+        "per-gesture FRY failed to pull F0 into pulse register"
+    );
+}
+
