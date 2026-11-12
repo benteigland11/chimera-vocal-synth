@@ -456,42 +456,30 @@ fn render_notes_tele_records_the_live_telemetry_without_changing_the_sound() {
 }
 
 #[test]
-fn vocal_box_two_mass_and_emotion_cli_flags_render_and_validate() {
+fn default_voice_and_emotion_cli_render_and_validate() {
     let stem_default = tmp("vb-default");
-    let stem_vb = tmp("vb-lf");
-    let stem_tm = tmp("vb-tm-operatic");
+    let stem_operatic = tmp("vb-operatic");
 
-    // 1. Default speech vs --vocal-box vs --two-mass --emotion operatic produce distinct valid WAVs
-    chimera(&["render", "speech", &stem_default, "ˈhɛloʊ", "female"]);
-    let out_vb = chimera(&[
+    // 1. Default speech uses the unified physical VocalBoxVoice; --emotion alters synthesis
+    let out_def = chimera(&["render", "speech", &stem_default, "ˈhɛloʊ", "female"]);
+    assert!(out_def.contains("wrote"), "{out_def}");
+
+    let out_op = chimera(&[
         "render",
         "speech",
-        &stem_vb,
+        &stem_operatic,
         "ˈhɛloʊ",
         "female",
-        "--vocal-box",
-    ]);
-    assert!(out_vb.contains("wrote"), "{out_vb}");
-
-    let out_tm = chimera(&[
-        "render",
-        "speech",
-        &stem_tm,
-        "ˈhɛloʊ",
-        "female",
-        "--two-mass",
         "--emotion",
         "operatic",
     ]);
-    assert!(out_tm.contains("wrote"), "{out_tm}");
+    assert!(out_op.contains("wrote"), "{out_op}");
 
     let wav_def = std::fs::read(format!("{stem_default}.wav")).unwrap();
-    let wav_vb = std::fs::read(format!("{stem_vb}.wav")).unwrap();
-    let wav_tm = std::fs::read(format!("{stem_tm}.wav")).unwrap();
-    assert_ne!(wav_def, wav_vb, "--vocal-box must use VocalBoxVoice");
-    assert_ne!(wav_vb, wav_tm, "--two-mass --emotion operatic must alter synthesis");
+    let wav_op = std::fs::read(format!("{stem_operatic}.wav")).unwrap();
+    assert_ne!(wav_def, wav_op, "--emotion operatic must alter synthesis");
 
-    for w in [&wav_vb, &wav_tm] {
+    for w in [&wav_def, &wav_op] {
         let samples: Vec<i16> = w[44..]
             .as_chunks::<2>()
             .0
@@ -502,9 +490,9 @@ fn vocal_box_two_mass_and_emotion_cli_flags_render_and_validate() {
         assert!(pk > 2500, "expected audible WAV peak, got {pk}");
     }
 
-    // 2. Invalid or missing --emotion exits non-zero with helpful preset list
+    // 2. Invalid --emotion exits non-zero with helpful preset list
     let bad = Command::new(env!("CARGO_BIN_EXE_chimera"))
-        .args(["render", "speech", &stem_vb, "ˈɑ", "--emotion", "martian"])
+        .args(["render", "speech", &stem_default, "ˈɑ", "--emotion", "martian"])
         .output()
         .unwrap();
     assert!(!bad.status.success());

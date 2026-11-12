@@ -176,6 +176,16 @@ impl TwoMassGlottis {
         self.measured_f0 = params.f0;
     }
 
+    /// Snap smoothed idle parameters at `clock == 0` so initial state matches `reset()` bit-for-bit.
+    #[inline]
+    pub fn sync_idle(&mut self) {
+        self.f0_now = self.params.f0;
+        self.f0_sm = self.params.f0;
+        self.measured_f0 = self.params.f0;
+        self.oq_sm = clamp(self.params.open_quotient, 0.30, 0.92);
+        self.sharp_sm = clamp(self.params.closure_sharpness, 0.0, 1.0);
+    }
+
     /// Synchronize mucosal-wave displacement & velocity to normalized glottal phase `phi` (`0..1`).
     pub fn sync_to_phase(&mut self, phi: f64, f0_hz: f64) {
         let f0 = clamp(f0_hz, 24.0, 1600.0);
@@ -277,13 +287,23 @@ impl TwoMassGlottis {
         let abd_gate = 1.0 - smoothstep(0.45 * abd_ref, 1.25 * abd_ref, self.abduct_sm);
         let drive_gate = p_gate * abd_gate * (1.0 - self.closure_sm);
 
-        // Membranous pre-phonatory neutral half-width x0 (cm)
-        let x0_modal = 0.0080 + 0.015 * (self.oq_sm - 0.35);
-        let x0 = clamp(x0_modal - 0.022 * self.closure_sm, -0.015, 0.045);
+        // Membranous pre-phonatory neutral half-width x0 (cm):
+        // Tight TA medial adduction (low OQ / pressed) narrows x0 so folds collide firmly;
+        // relaxed breathy adduction widens x0 toward a soft, H1-dominant open wave.
+        let oq_u = clamp((self.oq_sm - 0.34) / 0.52, 0.0, 1.0);
+        let x0_modal = lerp(0.0068, 0.0165, oq_u);
+        let x0 = clamp(x0_modal - 0.020 * self.closure_sm, -0.012, 0.045);
+
+        // Collision stiffness & CT/TA pitch coordination (Titze 1994):
+        // Stronger collision shortens the closed half-period by ~1/sqrt(1 + col_k); scaling open
+        // stiffness by the closed-fraction duty factor keeps F0 true to target across adduction modes.
+        let col_k = 0.78 + 0.52 * self.sharp_sm;
+        let phi_col = clamp((0.025 - x0_modal) / 0.050, 0.0, 0.45);
+        let col_comp = (1.0 - phi_col) + phi_col / sqrt(1.0 + 0.85 * col_k);
 
         // Ishizaka & Flanagan (1972) natural-frequency detuning (omega_1 > omega_2 -> x1 leads x2!)
         let f0_inst = clamp(f0_target / self.period_scale_sm, 22.0, 1800.0);
-        let omega = TAU * f0_inst * self.q_trim_sm / 0.985;
+        let omega = TAU * f0_inst * self.q_trim_sm * col_comp / 0.915;
         let k1 = (1.16 * omega) * (1.16 * omega);
         let k2 = (0.84 * omega) * (0.84 * omega);
         let kc = 0.54 * omega * omega;
@@ -342,8 +362,8 @@ impl TwoMassGlottis {
             let f_seed1 = -f_entrain * sin(ang);
             let f_seed2 = -0.86 * f_entrain * sin(ang - 0.98);
 
-            let col1 = if a1 < 0.0 { 0.85 * k1 * a1 } else { 0.0 };
-            let col2 = if a2 < 0.0 { 0.85 * k2 * a2 } else { 0.0 };
+            let col1 = if a1 < 0.0 { col_k * k1 * a1 } else { 0.0 };
+            let col2 = if a2 < 0.0 { col_k * k2 * a2 } else { 0.0 };
             let d1 = if a1 < 0.0 { c1_open * 2.2 } else { c1_open };
             let d2 = if a2 < 0.0 { c2_open * 2.2 } else { c2_open };
 
@@ -378,17 +398,17 @@ impl TwoMassGlottis {
         let thresh = 0.001;
         let is_open = a_min_smooth > thresh;
         self.period_acc += 1.0;
-        if is_open && !self.prev_open && self.period_acc > 0.55 * self.fs / js_max(f0_target, 24.0)
+        if is_open && !self.prev_open && self.period_acc > 0.50 * self.fs / js_max(f0_target, 24.0)
         {
             let denom = js_max((a_min_smooth - self.prev_amin).abs(), 1e-12);
             let frac = clamp((a_min_smooth - thresh) / denom, 0.0, 1.0);
             let exact_samples = self.period_acc - frac;
             let inst_f0 = self.fs / js_max(exact_samples, 1.0);
             let expected = f0_target / self.cycle_period_scale;
-            if inst_f0 > 0.65 * expected && inst_f0 < 1.55 * expected {
+            if inst_f0 > 0.58 * expected && inst_f0 < 1.80 * expected {
                 self.measured_f0 = lerp(self.measured_f0, inst_f0, 0.45);
-                let ratio = clamp(expected / inst_f0, 0.85, 1.18);
-                self.q_trim = clamp(self.q_trim * pow(ratio, 0.24), 0.80, 1.25);
+                let ratio = clamp(expected / inst_f0, 0.82, 1.22);
+                self.q_trim = clamp(self.q_trim * pow(ratio, 0.28), 0.70, 1.30);
             }
             self.period_acc = frac;
 
@@ -475,7 +495,7 @@ impl TwoMassGlottis {
         self.voicing = clamp(self.voicing_sm, 0.0, 1.0);
 
         // Progressive anterior-to-posterior mucosal zipper contact + cartilaginous abduction + chink
-        let zipper_delta = lerp(0.0085, 0.0016, self.sharp_sm);
+        let zipper_delta = lerp(0.0155, 0.0011, self.sharp_sm);
         let h_vib = zipper_area_c1(a_min_smooth, zipper_delta) * self.voicing;
         let dyn_gain = self.amp_sm / 0.028;
 

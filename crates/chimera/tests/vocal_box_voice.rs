@@ -132,10 +132,8 @@ fn audio_path_and_telemetry_do_not_allocate() {
     for step in 0..40 {
         if step == 10 {
             voice.set_emotion(EmotionPreset::Operatic);
-            voice.set_two_mass(true);
         } else if step == 25 {
             voice.set_emotion(EmotionPreset::Whisper);
-            voice.set_two_mass(false);
         }
         voice.render(&mut block);
         voice.telemetry(&mut tele);
@@ -185,70 +183,62 @@ fn all_thirteen_emotion_presets_parse_and_differentiate_acoustically() {
     let mut stats = std::collections::HashMap::new();
 
     for preset in EmotionPreset::ALL {
-        for two_mass in [false, true] {
-            let plan = plan_utterance(
-                &segs,
-                &PlanOptions {
-                    body: BodyMix::MALE,
-                    t0: 0.04,
-                    f0: Some(125.0),
-                    rate: Some(preset.profile().rate_scale),
-                    ..Default::default()
-                },
-            );
-            let mut v = VocalBoxVoice::new(FS, BodyMix::MALE);
-            v.set_source(&SourcePatch::f0(125.0));
-            v.set_emotion(preset);
-            v.set_two_mass(two_mass);
-            v.schedule(&plan.gestures);
+        let plan = plan_utterance(
+            &segs,
+            &PlanOptions {
+                body: BodyMix::MALE,
+                t0: 0.04,
+                f0: Some(125.0),
+                rate: Some(preset.profile().rate_scale),
+                ..Default::default()
+            },
+        );
+        let mut v = VocalBoxVoice::new(FS, BodyMix::MALE);
+        v.set_source(&SourcePatch::f0(125.0));
+        v.set_emotion(preset);
+        v.schedule(&plan.gestures);
 
-            let n = ((plan.end + 0.20) * FS).round() as usize;
-            let mut out = vec![0.0f32; n];
-            let mut f0_acc = 0.0;
-            let mut f0_cnt = 0usize;
-            let mut max_voic = 0.0f64;
-            for chunk in out.chunks_mut(128) {
-                v.render(chunk);
-                let tel = v.instant_telemetry();
-                max_voic = max_voic.max(tel.voicing);
-                if tel.voicing > 0.5 {
-                    f0_acc += tel.f0_now_hz;
-                    f0_cnt += 1;
-                }
-            }
-
-            assert!(
-                out.iter().all(|x| x.is_finite() && x.abs() <= 0.999),
-                "{preset:?} (two_mass={two_mass}) produced non-finite or clipped samples"
-            );
-            let r = rms(&out);
-            assert!(
-                r > 0.003,
-                "{preset:?} (two_mass={two_mass}) too quiet: rms={r}"
-            );
-
-            if !two_mass {
-                let s0 = (0.12 * FS) as usize;
-                let s1 = ((plan.end - 0.04) * FS) as usize;
-                let mid = &out[s0..s1];
-                let f0_band = band_energy_ratio_db(mid, FS, 90.0, 210.0);
-                let f1f2_band = band_energy_ratio_db(mid, FS, 600.0, 2000.0);
-                stats.insert(
-                    preset,
-                    EmStat {
-                        rms: rms(mid),
-                        mid_harm_db: f1f2_band - f0_band,
-                        ring_db: band_energy_ratio_db(mid, FS, 2650.0, 3450.0),
-                        mean_f0: if f0_cnt > 0 {
-                            f0_acc / f0_cnt as f64
-                        } else {
-                            0.0
-                        },
-                        max_voicing: max_voic,
-                    },
-                );
+        let n = ((plan.end + 0.20) * FS).round() as usize;
+        let mut out = vec![0.0f32; n];
+        let mut f0_acc = 0.0;
+        let mut f0_cnt = 0usize;
+        let mut max_voic = 0.0f64;
+        for chunk in out.chunks_mut(128) {
+            v.render(chunk);
+            let tel = v.instant_telemetry();
+            max_voic = max_voic.max(tel.voicing);
+            if tel.voicing > 0.5 {
+                f0_acc += tel.f0_now_hz;
+                f0_cnt += 1;
             }
         }
+
+        assert!(
+            out.iter().all(|x| x.is_finite() && x.abs() <= 0.999),
+            "{preset:?} produced non-finite or clipped samples"
+        );
+        let r = rms(&out);
+        assert!(r > 0.003, "{preset:?} too quiet: rms={r}");
+
+        let s0 = (0.12 * FS) as usize;
+        let s1 = ((plan.end - 0.04) * FS) as usize;
+        let mid = &out[s0..s1];
+        let f0_band = band_energy_ratio_db(mid, FS, 90.0, 210.0);
+        let f1f2_band = band_energy_ratio_db(mid, FS, 600.0, 2000.0);
+        stats.insert(
+            preset,
+            EmStat {
+                rms: rms(mid),
+                mid_harm_db: f1f2_band - f0_band,
+                ring_db: band_energy_ratio_db(mid, FS, 2650.0, 3450.0),
+                mean_f0: if f0_cnt > 0 {
+                    f0_acc / f0_cnt as f64
+                } else {
+                    0.0
+                },
+                max_voicing: max_voic,
+            },
+        );
     }
 
     // Physical emotion contrast checks:
@@ -436,7 +426,6 @@ fn singing_phrase_locks_onto_midi_pitches_and_is_block_invariant() {
         let mut v = VocalBoxVoice::new(FS, BodyMix::FEMALE);
         v.musical_pitch_lock = true;
         v.set_emotion(EmotionPreset::Operatic);
-        v.set_two_mass(true);
         v.set_source(&SourcePatch::f0(midi_to_hz(60.0)));
         v.schedule(&plan.gestures);
         let mut out = vec![0.0f32; total];
@@ -490,7 +479,7 @@ fn singing_phrase_locks_onto_midi_pitches_and_is_block_invariant() {
 }
 
 #[test]
-fn connected_speech_multi_syllable_has_zero_dropouts_in_both_valve_modes() {
+fn connected_speech_multi_syllable_has_zero_dropouts() {
     chimera::init();
     // "We built this new voice from first principles" — short function words + voiceless clusters
     let segs = tokenize_ipa("wi ˈbɪlt ðɪs ˈnu ˈvɔɪs frʌm ˈfɝst ˈprɪnsəpəlz");
@@ -504,30 +493,23 @@ fn connected_speech_multi_syllable_has_zero_dropouts_in_both_valve_modes() {
         },
     );
 
-    for two_mass in [false, true] {
-        let mut v = VocalBoxVoice::new(FS, BodyMix::MALE);
-        v.set_two_mass(two_mass);
-        v.schedule(&plan.gestures);
-        let mut out = vec![0.0f32; ((plan.end + 0.25) * FS).round() as usize];
-        v.render(&mut out);
+    let mut v = VocalBoxVoice::new(FS, BodyMix::MALE);
+    v.schedule(&plan.gestures);
+    let mut out = vec![0.0f32; ((plan.end + 0.25) * FS).round() as usize];
+    v.render(&mut out);
 
-        for seg in &plan.segments {
-            if matches!(
-                seg.ipa.as_str(),
-                "i" | "ɪ" | "u" | "ɔɪ" | "ʌ" | "ɝ" | "ə"
-            ) {
-                let ia = (seg.t0 * FS).round() as usize;
-                let ib = ((seg.t1 * FS).round() as usize).min(out.len());
-                let seg_rms = rms(&out[ia..ib]);
-                // Inter-voiceless reduced schwa /səp/ in "ˈprɪnsəpəlz" has natural ~0.0148 RMS in HumanVoice & TwoMass
-                assert!(
-                    seg_rms > 0.012,
-                    "syllable dropout in two_mass={two_mass} on vowel {:?} [{:.3}..{:.3}s]: rms={seg_rms:.4}",
-                    seg.ipa,
-                    seg.t0,
-                    seg.t1
-                );
-            }
+    for seg in &plan.segments {
+        if matches!(seg.ipa.as_str(), "i" | "ɪ" | "u" | "ɔɪ" | "ʌ" | "ɝ" | "ə") {
+            let ia = (seg.t0 * FS).round() as usize;
+            let ib = ((seg.t1 * FS).round() as usize).min(out.len());
+            let seg_rms = rms(&out[ia..ib]);
+            assert!(
+                seg_rms > 0.012,
+                "syllable dropout on vowel {:?} [{:.3}..{:.3}s]: rms={seg_rms:.4}",
+                seg.ipa,
+                seg.t0,
+                seg.t1
+            );
         }
     }
 }
@@ -536,7 +518,7 @@ fn connected_speech_multi_syllable_has_zero_dropouts_in_both_valve_modes() {
 fn speech_and_singing_are_dynamic_and_free_of_clicks_or_flat_topping() {
     chimera::init();
 
-    // 1. Sibilant-to-vowel VOT transitions ("ˈʃɑpɑ ˈsɑmɑ") in both valve modes must be C1-smooth
+    // 1. Sibilant-to-vowel VOT transitions ("ˈʃɑpɑ ˈsɑmɑ") must be C1-smooth
     //    without single-sample state-teleport pops (bounded |Δ²x| / rms) or brick-wall flat-topping.
     let vot_plan = plan_utterance(
         &tokenize_ipa("ˈʃɑpɑ ˈsɑmɑ"),
@@ -547,23 +529,25 @@ fn speech_and_singing_are_dynamic_and_free_of_clicks_or_flat_topping() {
             ..Default::default()
         },
     );
-    for (two_mass, preset) in [
-        (false, EmotionPreset::Natural),
-        (true, EmotionPreset::Warm),
-        (true, EmotionPreset::Dramatic),
-        (true, EmotionPreset::Angry),
+    for preset in [
+        EmotionPreset::Natural,
+        EmotionPreset::Warm,
+        EmotionPreset::Dramatic,
+        EmotionPreset::Angry,
     ] {
         let mut v = VocalBoxVoice::new(FS, BodyMix::FEMALE);
-        v.set_two_mass(two_mass);
         v.set_emotion(preset);
         v.schedule(&vot_plan.gestures);
         let mut out = vec![0.0f32; ((vot_plan.end + 0.20) * FS).round() as usize];
         v.render(&mut out);
 
         let r = rms(&out);
-        assert!(r > 0.015, "expected audible speech for {preset:?} (two_mass={two_mass}), got rms={r}");
+        assert!(
+            r > 0.015,
+            "expected audible speech for {preset:?}, got rms={r}"
+        );
 
-        // Check zero consecutive brick-wall flat-topped peak samples (|x[i]| > 0.65 and |x[i]-x[i-1]| < 1e-6)
+        // Check zero consecutive brick-wall flat-topped peak plateaus
         let mut max_flat_run = 0usize;
         let mut cur_run = 0usize;
         for w in out.windows(2) {
@@ -576,14 +560,12 @@ fn speech_and_singing_are_dynamic_and_free_of_clicks_or_flat_topping() {
         }
         assert!(
             max_flat_run <= 1,
-            "{preset:?} (two_mass={two_mass}) exhibited brick-wall flat-topped peak run of {max_flat_run} steps"
+            "{preset:?} exhibited brick-wall flat-topped peak run of {max_flat_run} steps"
         );
 
-        // Check 2nd-derivative smoothness in voiced windows (after sibilant frication settles)
-        // specifically across VOT onset of the two vowels (segments[1] and segments[5])
+        // Check 2nd-derivative smoothness in voiced windows across VOT onset
         for &seg_idx in &[1usize, 5usize] {
             let seg = &vot_plan.segments[seg_idx];
-            // Inspect from 15 ms before vowel start through 60 ms into vowel VOT
             let ia = ((seg.t0 + 0.008) * FS).round() as usize;
             let ib = ((seg.t0 + 0.075) * FS).round() as usize;
             let win = &out[ia..ib.min(out.len())];
@@ -595,13 +577,13 @@ fn speech_and_singing_are_dynamic_and_free_of_clicks_or_flat_topping() {
             }
             assert!(
                 max_d2 / win_rms < 2.2,
-                "VOT pop/click detected in {preset:?} (two_mass={two_mass}) at seg {seg_idx}: max_d2/rms={:.2}",
+                "VOT pop/click detected in {preset:?} at seg {seg_idx}: max_d2/rms={:.2}",
                 max_d2 / win_rms
             );
         }
     }
 
-    // 2. Loud operatic high singing must preserve dynamic crest factor (> 10.5 dB) with 0 flat-topped plateaus
+    // 2. Loud operatic high singing stays strictly below the 0.86 soft-clip knee with 0 flat plateaus
     let syl = |txt: &str, onset: &[&str], nuc: &str| Syllable {
         text: txt.into(),
         onset: onset.iter().map(|s| Segment::new(s)).collect(),
@@ -632,7 +614,6 @@ fn speech_and_singing_are_dynamic_and_free_of_clicks_or_flat_topping() {
     );
     let mut vs = VocalBoxVoice::new(FS, BodyMix::FEMALE);
     vs.musical_pitch_lock = true;
-    vs.set_two_mass(true);
     vs.set_emotion(EmotionPreset::Operatic);
     vs.set_source(&SourcePatch::f0(midi_to_hz(69.0)));
     vs.schedule(&song.gestures);

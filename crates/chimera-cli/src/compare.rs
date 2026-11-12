@@ -31,7 +31,7 @@
 //! apart, which is why there are no LPC formants here.
 
 use crate::js::fixed;
-use crate::{Ctx, FS, body};
+use crate::{Ctx, FS, body_mix};
 use chimera::analysis::fft::{Fft, hann, next_pow2};
 use chimera::analysis::pitch::{YinOpts, yin_pitch};
 use chimera::math::{js_round, midi_to_hz};
@@ -39,7 +39,8 @@ use chimera::phonetics::Segment;
 use chimera::phonetics::Syllable;
 use chimera::phonetics::planner::diphthong_parts;
 use chimera::phonetics::sing::{SongOptions, SungNote, plan_song};
-use chimera::voice::human_voice::{HumanVoice, SourcePatch};
+use chimera::vocal_box::VocalBoxVoice;
+use chimera::voice::human_voice::SourcePatch;
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -257,8 +258,8 @@ struct Render {
 /// Sing the notes on the recording's timeline: one `plan_song` per phrase, 60 bpm so beats are
 /// seconds; a note lasts until the next one starts (its last note, to its own end).
 fn render_notes(notes: &[Note], body_name: &str, seconds: f64) -> Result<Render, String> {
-    let b = body(body_name)?;
-    let mut v = HumanVoice::new(FS, b, 2);
+    let mut v = VocalBoxVoice::new(FS, body_mix(body_name)?);
+    v.musical_pitch_lock = true;
     v.set_source(&SourcePatch {
         f0: Some(midi_to_hz(notes[0].midi)),
         voiced: Some(true),
@@ -1030,7 +1031,7 @@ pub fn csd(ctx: &Ctx, a: &[String]) -> Result<(), String> {
             _ => pos.push(x),
         }
     }
-    body(&body_name)?;
+    body_mix(&body_name)?;
     let default_dir = format!(
         "{}/datasets/csd/CSD",
         std::env::var("HOME").unwrap_or_default()

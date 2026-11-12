@@ -21,7 +21,6 @@ use chimera::anatomy::human::BodyMix;
 use chimera::phonetics::planner::{PhraseInput, PlanOptions, diphthong_parts, plan_phrases};
 use chimera::phonetics::vowel_data::VOWELS;
 use chimera::vocal_box::VocalBoxVoice;
-use chimera::voice::human_voice::HumanVoice;
 use std::collections::HashMap;
 
 const SENTENCES: [&str; 5] = [
@@ -118,32 +117,17 @@ pub fn run(ctx: &Ctx, a: &[String]) -> Result<(), String> {
         let mut out = vec![0f32; n];
         let (mut port, mut f0t, mut voic) = (Vec::new(), Vec::new(), Vec::new());
 
-        if ctx.use_vocal_box() {
-            let mut v = VocalBoxVoice::new(FS, BodyMix::MALE);
-            v.set_two_mass(ctx.two_mass);
-            if let Some(em) = ctx.emotion {
-                v.set_emotion(em);
-            }
-            v.schedule(&plan.gestures);
-            for block in out.chunks_mut(128) {
-                v.render(block);
-                let tel = v.instant_telemetry();
-                port.push(tel.velum_port_cm2);
-                f0t.push(tel.f0_now_hz);
-                voic.push(tel.voicing);
-            }
-        } else {
-            let mut v = HumanVoice::new(FS, chimera::anatomy::human::BODY_MALE, 2);
-            if let Some(em) = ctx.emotion {
-                v.set_source(&em.profile().to_source_patch(110.0));
-            }
-            v.schedule(&plan.gestures);
-            for block in out.chunks_mut(128) {
-                v.render(block);
-                port.push(v.airway.frame.as_ref().map_or(0.0, |f| f.velum_port));
-                f0t.push(v.glottis.f0_now);
-                voic.push(v.glottis.voicing);
-            }
+        let mut v = VocalBoxVoice::new(FS, BodyMix::MALE);
+        if let Some(em) = ctx.emotion {
+            v.set_emotion(em);
+        }
+        v.schedule(&plan.gestures);
+        for block in out.chunks_mut(128) {
+            v.render(block);
+            let tel = v.instant_telemetry();
+            port.push(tel.velum_port_cm2);
+            f0t.push(tel.f0_now_hz);
+            voic.push(tel.voicing);
         }
         let frame_at = |t: f64| {
             js_min(

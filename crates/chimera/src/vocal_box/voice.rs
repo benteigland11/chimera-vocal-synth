@@ -2,8 +2,7 @@
 //!
 //! Built strictly on the four irreducible physical elements of human voice production:
 //! 1. **Subglottal Supply** (`lungs` + `trachea` tube with yielding tracheal walls),
-//! 2. **Myoelastic-Aerodynamic Glottal Valve** ([`GlottalValve`]: progressive-zipper [`super::RibbonGlottis`]
-//!    or coupled 2-DOF [`crate::sources::two_mass::TwoMassGlottis`] across `glottis_port`),
+//! 2. **Coupled Vocal Folds** ([`TwoMassGlottis`] self-oscillating across `glottis_port`),
 //! 3. **Articulated Supraglottal Waveguide** ([`HumanAirway`]: 2D midsagittal geometry $\to$ soft-wall
 //!    `pharynx` + `oral` tubes, inelastic palate contact mechanics, Reynolds constriction & teeth jets),
 //! 4. **Velopharyngeal Bifurcation** (`velum_port` $\to$ `nasal` tube + maxillary sinus $\to$ nostrils).
@@ -13,7 +12,7 @@
 //! sibilants, nasal anti-formants, and singer's-ring inertance emerge directly from conservation of
 //! mass and momentum in the airway.
 
-use super::glottal::{BodyAnatomy, GlottalValve, register_state};
+use super::glottal::{BodyAnatomy, register_state};
 use crate::airway::decimator::Decimator;
 use crate::anatomy::geom::Vec2;
 use crate::anatomy::human::{
@@ -26,6 +25,7 @@ use crate::math::{
     tanh,
 };
 use crate::physics::CM_H2O;
+use crate::sources::two_mass::TwoMassGlottis;
 use crate::voice::human_airway::HumanAirway;
 use crate::voice::human_voice::{
     DEFAULT_SOURCE, SCOPE_POINTS, SourcePatch, VoiceSource, VoiceTelemetry, oversample_for,
@@ -453,7 +453,7 @@ pub struct VocalBoxVoice {
     pub body_mix: BodyMix,
     pub anatomy: BodyAnatomy,
     pub airway: HumanAirway,
-    pub valve: GlottalValve,
+    pub folds: TwoMassGlottis,
     pub artic: ArticulatorBank,
     pub source: VoiceSource,
     pub score: GestureScore,
@@ -550,7 +550,7 @@ impl VocalBoxVoice {
             body_mix: anatomy.mix,
             anatomy,
             airway,
-            valve: GlottalValve::new(fs),
+            folds: TwoMassGlottis::new(fs),
             artic: init_artic,
             source,
             score: GestureScore::new(),
@@ -657,18 +657,6 @@ impl VocalBoxVoice {
         self.ctrl_counter = 0;
     }
 
-    #[inline]
-    pub fn two_mass(&self) -> bool {
-        self.valve.is_two_mass()
-    }
-
-    /// Enable or disable coupled self-oscillating Two-Mass vocal folds across `glottis_port`.
-    pub fn set_two_mass(&mut self, enabled: bool) {
-        self.apply_source();
-        self.valve.set_two_mass(enabled);
-        self.ctrl_counter = 0;
-    }
-
     pub fn set_articulation(&mut self, values: &ArticPatch, tip_free: Option<bool>) {
         if let Some(t) = tip_free {
             self.artic.tip_free = t;
@@ -715,9 +703,9 @@ impl VocalBoxVoice {
         let gp = self.airway.glottis_port;
         let rn = self.airway.rad_nose;
         VocalBoxTelemetry {
-            f0_now_hz: self.valve.f0_now(),
-            voicing: self.valve.voicing(),
-            glottal_area_cm2: self.valve.area(),
+            f0_now_hz: self.folds.f0_now,
+            voicing: self.folds.voicing,
+            glottal_area_cm2: self.folds.area,
             glottal_flow_cm3_s: self.airway.net.u[gp],
             velum_port_cm2: self.airway.frame.as_ref().map_or(0.0, |f| f.velum_port),
             nasal_flow_cm3_s: self.airway.net.radiated_flow(rn),
@@ -725,7 +713,7 @@ impl VocalBoxVoice {
         }
     }
 
-    /// Deterministically reset airway, glottal valve, articulators, and clock with zero allocations.
+    /// Deterministically reset airway, vocal folds, articulators, and clock with zero allocations.
     pub fn reset(&mut self) {
         self.artic = ArticulatorBank::new();
         self.clock = 0.0;
@@ -766,7 +754,7 @@ impl VocalBoxVoice {
         self.score.clear();
         self.apply_emotion_posture(true);
         self.apply_source();
-        self.valve.reset();
+        self.folds.reset();
     }
 
     fn apply_emotion_posture(&mut self, snap_now: bool) {
@@ -824,27 +812,24 @@ impl VocalBoxVoice {
         let effort = clamp((s.pressure.abs() - 3.0) / 10.0, 0.0, 1.0);
 
         let idle = self.clock == 0.0;
-        let f0 = self.f0;
-        let (g1, g2) = self.valve.params_mut();
-        for g in [g1, g2] {
-            g.f0 = f0;
-            g.amplitude = amp;
-            g.abduction = base_abd;
-            g.chink = chink;
-            g.open_quotient = oq;
-            g.closure_sharpness = closure_sharpness;
-            g.skew = skew;
-            g.fry = s.fry;
-            g.jitter = jitter;
-            g.shimmer = shimmer;
-            g.diplophonia = diplophonia;
-            g.vibrato_depth = s.vibrato_depth;
-            g.vibrato_rate = s.vibrato_rate;
-            g.drift = s.drift;
-            g.effort = effort;
-        }
+        let g = &mut self.folds.params;
+        g.f0 = self.f0;
+        g.amplitude = amp;
+        g.abduction = base_abd;
+        g.chink = chink;
+        g.open_quotient = oq;
+        g.closure_sharpness = closure_sharpness;
+        g.skew = skew;
+        g.fry = s.fry;
+        g.jitter = jitter;
+        g.shimmer = shimmer;
+        g.diplophonia = diplophonia;
+        g.vibrato_depth = s.vibrato_depth;
+        g.vibrato_rate = s.vibrato_rate;
+        g.drift = s.drift;
+        g.effort = effort;
         if idle {
-            self.valve.sync_idle();
+            self.folds.sync_idle();
         }
     }
 
@@ -870,7 +855,7 @@ impl VocalBoxVoice {
                 let net = &mut self.airway.net;
                 self.p_lung_now += self.p_lung_step;
                 net.set_fixed_pressure(lungs, self.p_lung_now);
-                let a = self.valve.step(net.p[sub_node] - net.p[supra]);
+                let a = self.folds.step(net.p[sub_node] - net.p[supra]);
                 net.set_port_area(gp, a);
                 let y = net.step();
 
@@ -916,7 +901,7 @@ impl VocalBoxVoice {
                     // Phase-locked glottal scope at output rate
                     self.scope_area[self.scope_pos] = a as f32;
                     self.scope_flow[self.scope_pos] = net.u[gp] as f32;
-                    let ph = self.valve.cycle_phase();
+                    let ph = self.folds.cycle_phase();
                     if ph < self.last_phase {
                         self.cycle_starts[self.cycle_idx & 7] = self.scope_pos;
                         self.cycle_idx = self.cycle_idx.wrapping_add(1);
@@ -1003,7 +988,7 @@ impl VocalBoxVoice {
             // rapid spoken syllables while blooming organically on held sung notes & long vowels.
             let rel_df0 = (f0_target - self.prev_f0_target).abs() / js_max(f0_target, 50.0);
             self.prev_f0_target = f0_target;
-            if self.valve.voicing() > 0.40 && rel_df0 < 1.8 * dt {
+            if self.folds.voicing > 0.40 && rel_df0 < 1.8 * dt {
                 self.steady_voiced_s = js_min(1.0, self.steady_voiced_s + dt);
             } else {
                 self.steady_voiced_s = js_max(0.0, self.steady_voiced_s - 3.0 * dt);
@@ -1023,12 +1008,10 @@ impl VocalBoxVoice {
                 self.source.vibrato_depth * vib_bloom
             };
 
-            let (g1, g2) = self.valve.params_mut();
-            for g in [g1, g2] {
-                g.abduction = abd;
-                g.closure = clos;
-                g.vibrato_depth = vib_d;
-            }
+            let g = &mut self.folds.params;
+            g.abduction = abd;
+            g.closure = clos;
+            g.vibrato_depth = vib_d;
 
             if js_trunc_i32(self.clock * 10.0) != js_trunc_i32((self.clock - dt) * 10.0) {
                 self.score.prune(t - 0.2);
@@ -1037,18 +1020,16 @@ impl VocalBoxVoice {
             self.artic.step(dt, None, 1.0);
             let rel_df0 = (f0_target - self.prev_f0_target).abs() / js_max(f0_target, 50.0);
             self.prev_f0_target = f0_target;
-            if self.valve.voicing() > 0.40 && rel_df0 < 1.8 * dt {
+            if self.folds.voicing > 0.40 && rel_df0 < 1.8 * dt {
                 self.steady_voiced_s = js_min(1.0, self.steady_voiced_s + dt);
             } else {
                 self.steady_voiced_s = js_max(0.0, self.steady_voiced_s - 3.0 * dt);
             }
             let vib_bloom = smoothstep(0.16, 0.42, self.steady_voiced_s);
-            let (g1, g2) = self.valve.params_mut();
-            for g in [g1, g2] {
-                g.abduction = self.base_abduction;
-                g.closure = self.base_closure;
-                g.vibrato_depth = self.source.vibrato_depth * vib_bloom;
-            }
+            let g = &mut self.folds.params;
+            g.abduction = self.base_abduction;
+            g.closure = self.base_closure;
+            g.vibrato_depth = self.source.vibrato_depth * vib_bloom;
             self.score_f0 = None;
         }
         self.clock += dt;
@@ -1110,14 +1091,12 @@ impl VocalBoxVoice {
         let by_tension = 0.62 * s.tension + 0.90 * js_max(0.0, s.tension - 0.56);
         let sharp = clamp((by_tension + 0.80 * bright) * reg.sharpness_scale, 0.0, 1.0);
 
-        let (g1, g2) = self.valve.params_mut();
-        for g in [g1, g2] {
-            g.f0 = self.f0;
-            g.effort = effort;
-            g.amplitude = amp;
-            g.open_quotient = oq;
-            g.closure_sharpness = sharp;
-        }
+        let g = &mut self.folds.params;
+        g.f0 = self.f0;
+        g.effort = effort;
+        g.amplitude = amp;
+        g.open_quotient = oq;
+        g.closure_sharpness = sharp;
 
         // Smoothed mean volume velocity per tract section for telemetry visuals
         let a_flow = 1.0 - exp(-dt / 0.03);
@@ -1182,7 +1161,7 @@ impl VocalBoxVoice {
 
         let mut start = (self.scope_pos + SCOPE_LEN - 1024) % SCOPE_LEN;
         let mut len = 1024usize;
-        if self.cycle_idx >= 3 && self.valve.voicing() > 0.2 {
+        if self.cycle_idx >= 3 && self.folds.voicing > 0.2 {
             let c2 = self.cycle_starts[(self.cycle_idx - 3) & 7];
             let c0 = self.cycle_starts[(self.cycle_idx - 1) & 7];
             let span = (c0 + SCOPE_LEN - c2) % SCOPE_LEN;
@@ -1222,8 +1201,8 @@ impl VocalBoxVoice {
         out.flow.clear();
         out.flow.extend(self.flow_sm.iter().map(|&x| x as f32));
         out.velum_port = self.airway.frame.as_ref().map_or(0.0, |f| f.velum_port);
-        out.f0 = self.valve.f0_now();
-        out.voicing = self.valve.voicing();
+        out.f0 = self.folds.f0_now;
+        out.voicing = self.folds.voicing;
         out.p_lung = self.p_lung_now / CM_H2O;
         out.out_rms = out_rms;
         out.noise_level = noise_level;
